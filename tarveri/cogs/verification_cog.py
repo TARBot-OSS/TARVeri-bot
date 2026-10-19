@@ -57,9 +57,6 @@ from tarveri.views.verification_views import (
 logger = logging.getLogger("tarveri")
 
 MAX_CONCURRENT_JOIN_HANDLERS = 5
-MASS_JOIN_WINDOW_SECONDS = 60
-MASS_JOIN_ALERT_THRESHOLD = 20
-MASS_JOIN_ALERT_COOLDOWN_SECONDS = 600
 
 __all__ = [
     "AlumniClaimModal",
@@ -673,26 +670,28 @@ class VerificationCog(commands.Cog, name="Verification"):
         now = time.monotonic()
         joins = self._recent_joins.setdefault(guild.id, deque())
         joins.append(now)
-        while joins and now - joins[0] > MASS_JOIN_WINDOW_SECONDS:
+        window = self.db.runtime_settings["mass_join_window_seconds"]
+        while joins and now - joins[0] > window:
             joins.popleft()
-        if len(joins) < MASS_JOIN_ALERT_THRESHOLD:
+        if len(joins) < self.db.runtime_settings["mass_join_threshold"]:
             return
         last_alert = self._mass_join_alerted_at.get(guild.id)
-        if last_alert is not None and now - last_alert < MASS_JOIN_ALERT_COOLDOWN_SECONDS:
+        cooldown = self.db.runtime_settings["mass_join_cooldown_seconds"]
+        if last_alert is not None and now - last_alert < cooldown:
             return
         self._mass_join_alerted_at[guild.id] = now
 
         await self.db.log(
             "WARNING",
             "MASS_JOIN_DETECTED",
-            f"{len(joins)} members joined '{guild.name}' within {MASS_JOIN_WINDOW_SECONDS}s",
+            f"{len(joins)} members joined '{guild.name}' within {window}s",
             guild=guild,
         )
         alert_embed = discord.Embed(
             title="⚠️ Mass Join Detected",
             description=(
                 f"**{len(joins)}** members joined **{guild.name}** in the last "
-                f"{MASS_JOIN_WINDOW_SECONDS} seconds. Auto-verification is still running; "
+                f"{window} seconds. Auto-verification is still running; "
                 "check for a raid."
             ),
             color=discord.Color.orange(),

@@ -67,6 +67,7 @@ Administrators can inspect comprehensive verification and membership metadata fo
 - **`/admin set_role [type] [role]`**: Configures `guest` or `admin` reviewer roles.
 - **`/admin panel [channel]`**: Posts the streamlined 3-button verification gateway panel.
 - **`/admin email_verification [enabled]`**: Enables or disables mandatory email OTP verification on the current server. When enabled, new members who verified without email in other servers must complete institutional email verification upon joining before roles are granted.
+- **Join Protection & Audit Tuning** (`/admin dashboard` → Config → "Join Protection & Audit Tuning"): Edits the mass-join alert window, threshold and cooldown, plus the audit-log batch size and flush interval. Values are stored in the database and apply to the next join or audit write, with no restart. Each field is validated before anything is saved; if any field is invalid, nothing changes. The join concurrency cap (5 handlers) is set in code and needs a restart to change.
 - **`/admin src [action]`**: Configure faculty SRC (Student Representative Council) roles (`FAFB SRC`, `CPUS SRC`, `FOCS SRC`, etc.) on the current server. Supports `status` (view current policy), `enable` (opt-in and restore roles), `disable` (opt-out of self-healing creation), and `remove` (cleanly delete all 8 faculty SRC roles from the server). Can also be managed interactively via `/admin dashboard` under the Diagnostics category.
 
 ---

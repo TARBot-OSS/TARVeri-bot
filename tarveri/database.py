@@ -28,6 +28,11 @@ from tarveri.db import (
     UptimeRepoMixin,
     VerificationRepoMixin,
 )
+from tarveri.runtime_settings import (
+    SETTINGS_BY_KEY,
+    default_runtime_values,
+    parse_runtime_value,
+)
 
 logger = logging.getLogger("tarveri")
 
@@ -255,14 +260,12 @@ class Database(
     Uses SQLite WAL mode for non-blocking concurrent reads during verification writes.
     """
 
-    AUDIT_FLUSH_BATCH_SIZE = 50
-    AUDIT_FLUSH_INTERVAL_SECONDS = 2.0
-
     def __init__(self, path: str):
         self.path = path
         self._conn: aiosqlite.Connection | None = None
         self._audit_buffer: list[tuple[Any, ...]] = []
         self._audit_flush_task: asyncio.Task[None] | None = None
+        self.runtime_settings: dict[str, float | int] = default_runtime_values()
 
     @property
     def is_connected(self) -> bool:
@@ -480,6 +483,13 @@ class Database(
                 added_by TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS runtime_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_by INTEGER,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type);
             CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
             CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);
@@ -656,6 +666,8 @@ class Database(
         except Exception as e:
             logger.debug(f"Legacy card_expiry_date migration notice: {e}")
 
+        await self.load_runtime_settings()
+
         cursor = await self._conn.execute("PRAGMA user_version;")
         row = await cursor.fetchone()
         current_version = row[0] if row else 0
@@ -664,6 +676,34 @@ class Database(
             await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
 
         await self._conn.commit()
+
+    async def load_runtime_settings(self) -> None:
+        values = default_runtime_values()
+        cursor = await self._conn.execute("SELECT key, value FROM runtime_settings;")
+        for key, raw in await cursor.fetchall():
+            setting = SETTINGS_BY_KEY.get(key)
+            if setting is None:
+                continue
+            try:
+                values[key] = parse_runtime_value(setting, raw)
+            except ValueError as exc:
+                logger.warning(f"Ignoring stored runtime setting '{key}': {exc}")
+        self.runtime_settings = values
+
+    async def set_runtime_setting(self, key: str, value: float | int, updated_by: int) -> None:
+        if key not in SETTINGS_BY_KEY:
+            raise KeyError(key)
+        await self._conn.execute(
+            """INSERT INTO runtime_settings (key, value, updated_by, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_by = excluded.updated_by,
+                   updated_at = excluded.updated_at;""",
+            (key, str(value), updated_by),
+        )
+        await self._conn.commit()
+        self.runtime_settings[key] = value
 
     async def close(self) -> None:
         """Flushes SQLite WAL to disk and closes the connection cleanly."""
@@ -995,7 +1035,7 @@ class Database(
         self._audit_buffer.append((ts, level, event_type, g_id, g_name, u_id, message))
         if self._audit_flush_task is None:
             self._audit_flush_task = asyncio.create_task(self._audit_flush_loop())
-        if len(self._audit_buffer) >= self.AUDIT_FLUSH_BATCH_SIZE:
+        if len(self._audit_buffer) >= self.runtime_settings["audit_flush_batch_size"]:
             await self.flush_audit_log()
 
     async def flush_audit_log(self) -> None:
@@ -1016,7 +1056,7 @@ class Database(
 
     async def _audit_flush_loop(self) -> None:
         while True:
-            await asyncio.sleep(self.AUDIT_FLUSH_INTERVAL_SECONDS)
+            await asyncio.sleep(self.runtime_settings["audit_flush_interval_seconds"])
             await self.flush_audit_log()
 
     # =========================================================================

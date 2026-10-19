@@ -15,6 +15,7 @@ from tarveri.config import (
     resolve_faculty_role,
     resolve_study_level_role,
 )
+from tarveri.runtime_settings import RUNTIME_SETTINGS, SETTINGS_BY_KEY, parse_runtime_form
 from tarveri.services.log_service import (
     archive_old_logs,
     list_daily_logs,
@@ -205,6 +206,44 @@ class GuestRoleModal(ui.Modal, title="⚙️ Configure Guest Role Name"):
 
         embed = await self.dashboard_view.build_config_embed(interaction.guild)
         await self.dashboard_view.update_message(interaction, embed=embed)
+
+
+class RuntimeSettingsModal(ui.Modal, title="🛡️ Join Protection & Audit Tuning"):
+    def __init__(self, cog: AdminCog, dashboard_view: AdminDashboardView) -> None:
+        super().__init__()
+        self.cog = cog
+        self.dashboard_view = dashboard_view
+        self.inputs: dict[str, ui.TextInput] = {}
+        for setting in RUNTIME_SETTINGS:
+            text_input = ui.TextInput(
+                label=setting.label,
+                default=f"{self.cog.db.runtime_settings[setting.key]:g}",
+                max_length=10,
+            )
+            self.inputs[setting.key] = text_input
+            self.add_item(text_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        values, errors = parse_runtime_form({key: item.value for key, item in self.inputs.items()})
+        if errors:
+            await interaction.response.send_message(
+                "❌ " + "\n❌ ".join(errors) + "\nNothing was saved.", ephemeral=True
+            )
+            return
+
+        for key, value in values.items():
+            await self.cog.db.set_runtime_setting(key, value, updated_by=interaction.user.id)
+        await self.cog.db.log(
+            "INFO",
+            "CONFIG_RUNTIME",
+            f"Admin {interaction.user} updated runtime settings: {values}",
+            user_id=interaction.user.id,
+        )
+
+        summary = "\n".join(f"• {SETTINGS_BY_KEY[key].label}: `{value:g}`" for key, value in values.items())
+        await interaction.response.send_message(
+            f"✅ Saved and applied immediately:\n{summary}", ephemeral=True
+        )
 
 
 class ChannelSelectComponent(ui.ChannelSelect):
@@ -469,6 +508,12 @@ class AdminDashboardView(ui.View):
             btn_set_admin_role = ui.Button(label="Set Admin Role", style=discord.ButtonStyle.secondary, emoji="🛡️")
             btn_set_admin_role.callback = self._on_set_admin_role_clicked
             self.add_item(btn_set_admin_role)
+
+            btn_runtime = ui.Button(
+                label="Join Protection & Audit Tuning", style=discord.ButtonStyle.secondary, emoji="🛡️"
+            )
+            btn_runtime.callback = self._on_runtime_settings_clicked
+            self.add_item(btn_runtime)
 
             btn_toggle_email = ui.Button(
                 label="Toggle Email Verification", style=discord.ButtonStyle.primary, emoji="📧"
@@ -1235,6 +1280,9 @@ class AdminDashboardView(ui.View):
     async def _on_alumni_revoke_clicked(self, interaction: discord.Interaction) -> None:
         modal = AlumniRevokeModal(self.cog, self)
         await interaction.response.send_modal(modal)
+
+    async def _on_runtime_settings_clicked(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(RuntimeSettingsModal(self.cog, self))
 
     async def _on_set_guest_role_clicked(self, interaction: discord.Interaction) -> None:
         modal = GuestRoleModal(self.cog, self)

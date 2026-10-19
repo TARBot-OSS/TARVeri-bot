@@ -3,11 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from tarveri.cogs.verification_cog import (
-    MASS_JOIN_ALERT_THRESHOLD,
-    MAX_CONCURRENT_JOIN_HANDLERS,
-    VerificationCog,
-)
+from tarveri.cogs.verification_cog import MAX_CONCURRENT_JOIN_HANDLERS, VerificationCog
 from tarveri.database import Database
 from tarveri.rate_limiter import RateLimiter
 from tarveri.services.verification_service import VerificationService
@@ -49,11 +45,12 @@ async def test_mass_join_alert_fires_once_per_cooldown(db):
     cog._handle_member_join = AsyncMock()
     guild = MagicMock(id=987, name="Raid Test Guild")
 
-    for i in range(MASS_JOIN_ALERT_THRESHOLD + 5):
+    threshold = db.runtime_settings["mass_join_threshold"]
+    for i in range(threshold + 5):
         await cog.on_member_join(MagicMock(id=i, guild=guild))
 
     assert service.send_admin_security_alert.await_count == 1
-    assert cog._handle_member_join.await_count == MASS_JOIN_ALERT_THRESHOLD + 5
+    assert cog._handle_member_join.await_count == threshold + 5
 
 
 async def test_no_mass_join_alert_below_threshold(db):
@@ -63,7 +60,7 @@ async def test_no_mass_join_alert_below_threshold(db):
     cog._handle_member_join = AsyncMock()
     guild = MagicMock(id=988, name="Quiet Guild")
 
-    for i in range(MASS_JOIN_ALERT_THRESHOLD - 1):
+    for i in range(db.runtime_settings["mass_join_threshold"] - 1):
         await cog.on_member_join(MagicMock(id=i, guild=guild))
 
     service.send_admin_security_alert.assert_not_awaited()
@@ -85,12 +82,13 @@ async def test_audit_rows_batch_until_flush(db):
 
 
 async def test_audit_buffer_flushes_when_batch_size_reached(db):
-    for i in range(Database.AUDIT_FLUSH_BATCH_SIZE):
+    batch_size = db.runtime_settings["audit_flush_batch_size"]
+    for i in range(batch_size):
         await db.log("INFO", "BULK_EVENT", f"message {i}")
 
     async with db.transaction() as conn:
         cursor = await conn.execute("SELECT COUNT(*) FROM audit_log WHERE event_type = 'BULK_EVENT'")
-        assert (await cursor.fetchone())[0] == Database.AUDIT_FLUSH_BATCH_SIZE
+        assert (await cursor.fetchone())[0] == batch_size
 
 
 async def test_close_flushes_pending_audit_rows(tmp_path):
