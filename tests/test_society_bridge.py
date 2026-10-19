@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tarveri.config import generate_society_pairing_token
+from tarveri.config import generate_society_pairing_token, sign_society_pairing
 from tarveri.database import Database
 
 
@@ -23,16 +23,24 @@ async def db(tmp_path: Path):
 
 def test_pairing_token_format():
     guild_id = 123456789012345678
-    token, token_hash = generate_society_pairing_token(guild_id)
+    token, token_hash = generate_society_pairing_token(guild_id, "s3cret")
 
     assert token.startswith(f"TARV-{guild_id}-")
     assert len(token_hash) == 64  # SHA-256
+    _, _, ts, sig = token.split("-")
+    assert sig == sign_society_pairing(guild_id, int(ts), "s3cret")
+
+
+def test_pairing_token_requires_secret(monkeypatch):
+    monkeypatch.delenv("TARVERI_BRIDGE_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="TARVERI_BRIDGE_SECRET"):
+        generate_society_pairing_token(1)
 
 
 @pytest.mark.asyncio
 async def test_society_pairing_crud(db: Database):
     guild_id = 987654321098765432
-    token, token_hash = generate_society_pairing_token(guild_id)
+    token, token_hash = generate_society_pairing_token(guild_id, "s3cret")
 
     # Initial state should be None
     assert await db.get_paired_society(guild_id) is None

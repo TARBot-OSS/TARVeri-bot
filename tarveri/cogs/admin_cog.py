@@ -2392,7 +2392,11 @@ class AdminCog(commands.Cog, name="Admin"):
         target_id = int(society_guild_id.strip())
         await interaction.response.defer(ephemeral=True)
 
-        token, token_hash = generate_society_pairing_token(target_id)
+        try:
+            token, token_hash = generate_society_pairing_token(target_id)
+        except RuntimeError as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
         await self.db.create_society_pairing(
             society_guild_id=target_id,
             token_hash=token_hash,

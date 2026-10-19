@@ -259,7 +259,7 @@ async def test_console_service_setup_admin_and_login_flow(mock_bot, mock_service
     assert "No console administrators have been initialized yet" in captured.getvalue()
 
     # 2. Setup admin rejected if not a Linux administrator
-    with patch("tarveri.services.console_service.is_linux_admin", return_value=False):
+    with patch("tarbot_console.core.is_linux_admin", return_value=False):
         captured = io.StringIO()
         with patch("sys.stdout", captured):
             await console.handle_command("setup-admin rootadmin secretpassword")
@@ -268,7 +268,7 @@ async def test_console_service_setup_admin_and_login_flow(mock_bot, mock_service
 
     # 3. Setup admin with Linux admin and correct PAM auth (mocked)
     with (
-        patch("tarveri.services.console_service.is_linux_admin", return_value=True),
+        patch("tarbot_console.core.is_linux_admin", return_value=True),
         patch.object(console, "_pam_authenticate", return_value=True),
     ):
         captured = io.StringIO()
@@ -279,7 +279,7 @@ async def test_console_service_setup_admin_and_login_flow(mock_bot, mock_service
         assert console.authenticated_user == "rootadmin"
 
     # 4. Subsequent setup-admin is blocked
-    with patch("tarveri.services.console_service.is_linux_admin", return_value=True):
+    with patch("tarbot_console.core.is_linux_admin", return_value=True):
         captured = io.StringIO()
         with patch("sys.stdout", captured):
             await console.handle_command("setup-admin secondadmin secretpassword")

@@ -19,6 +19,7 @@ from typing import Any, Final
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from tarbot_console import ConsoleAwareStreamHandler
 
 load_dotenv()
 
@@ -827,40 +828,6 @@ class DailyRotatingFileHandler(logging.Handler):
             self.release()
 
 
-class ConsoleAwareStreamHandler(logging.StreamHandler):
-    """
-    StreamHandler that buffers startup logs and routes real-time logs to the
-    interactive Split-Screen TUI console or standard stdout.
-    """
-
-    _prompt_active: bool = False
-    _log_buffer: list[str] = []
-    _console_instance: Any = None
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            # Audit log records for user console CMD input are saved to file logs,
-            # but not echoed back to console stdout since the user already typed them.
-            if record.name == "tarveri.console" and record.getMessage().startswith("[CMD]"):
-                return
-
-            msg = self.format(record)
-            ConsoleAwareStreamHandler._log_buffer.append(msg)
-            if len(ConsoleAwareStreamHandler._log_buffer) > 1000:
-                ConsoleAwareStreamHandler._log_buffer.pop(0)
-
-            if (
-                ConsoleAwareStreamHandler._console_instance
-                and getattr(ConsoleAwareStreamHandler._console_instance, "is_active", False)
-            ):
-                ConsoleAwareStreamHandler._console_instance.append_log(msg)
-            else:
-                sys.stdout.write(f"{msg}\n")
-                sys.stdout.flush()
-        except Exception:
-            self.handleError(record)
-
-
 def setup_logger(
     log_file: str = "tarveri.log",
     max_bytes: int = 2_000_000,
@@ -960,16 +927,20 @@ def mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
+def sign_society_pairing(society_guild_id: int, ts: int, secret: str) -> str:
+    """HMAC-SHA256 signature over the guild ID and issue time, shared with TARClub."""
+    payload = f"{society_guild_id}:{ts}".encode()
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()[:32]
+
+
 def generate_society_pairing_token(society_guild_id: int, secret: str = "") -> tuple[str, str]:
-    """Generates a secure pairing token and SHA-256 hash for TARClub integration."""
-    salt = os.urandom(8).hex()
+    """Generates a signed pairing token (`TARV-<guild>-<ts>-<sig>`) and its SHA-256 hash for TARClub."""
+    key = secret or os.getenv("TARVERI_BRIDGE_SECRET", "")
+    if not key:
+        raise RuntimeError("TARVERI_BRIDGE_SECRET is not set; it must match TARCLUB_SHARED_SECRET.")
     ts = int(datetime.now(UTC).timestamp())
-    payload = f"{society_guild_id}:{ts}:{salt}"
-    key = (secret or os.getenv("TARVERI_HMAC_SECRET") or "TARVERI_SOCIETY_SECRET").encode("utf-8")
-    sig = hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
-    token = f"TARV-{society_guild_id}-{ts}-{sig}"
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    return token, token_hash
+    token = f"TARV-{society_guild_id}-{ts}-{sign_society_pairing(society_guild_id, ts, key)}"
+    return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def is_valid_student_email(
