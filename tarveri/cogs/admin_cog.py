@@ -2403,6 +2403,13 @@ class AdminCog(commands.Cog, name="Admin"):
             paired_by=interaction.user.id,
             notes=notes,
         )
+        await self.db.log(
+            "INFO",
+            "SOCIETY_PAIR_ISSUED",
+            f"Pairing token issued for society guild {target_id} (notes: {notes or 'none'})",
+            guild=interaction.guild,
+            user_id=interaction.user.id,
+        )
 
         embed = discord.Embed(
             title="🤝 TARClub Society Pairing Token Generated",
@@ -2478,6 +2485,14 @@ class AdminCog(commands.Cog, name="Admin"):
         target_id = int(society_guild_id.strip())
         await interaction.response.defer(ephemeral=True)
         revoked = await self.db.revoke_society_pairing(target_id)
+        await self.db.log(
+            "INFO" if revoked else "WARNING",
+            "SOCIETY_PAIR_REVOKED" if revoked else "SOCIETY_PAIR_REVOKE_NOOP",
+            f"Pairing for society guild {target_id} "
+            f"{'revoked' if revoked else 'was not active, nothing revoked'}",
+            guild=interaction.guild,
+            user_id=interaction.user.id,
+        )
 
         if revoked:
             await interaction.followup.send(
