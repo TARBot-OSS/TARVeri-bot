@@ -5,6 +5,7 @@ Tests for TARVeri Interactive Minecraft-style Console CLI Service.
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -530,11 +531,13 @@ async def test_console_service_session_timeout(mock_bot, mock_service, tmp_path)
     assert console.is_authenticated
     assert console._last_activity >= prev_activity
 
-    # 2. Simulate 5 minutes (301 seconds) of idle time
-    console._last_activity = time.monotonic() - 305
+    # 2. Simulate 5 minutes (305 seconds) of idle time on a fixed clock; real monotonic() can be
+    # smaller than the offset on a freshly booted runner, which disables the timeout guard.
+    frozen_clock = SimpleNamespace(monotonic=lambda: 1000.0)
+    console._last_activity = 1000.0 - 305
 
     captured = io.StringIO()
-    with patch("sys.stdout", captured):
+    with patch("tarbot_console.core.time", frozen_clock), patch("sys.stdout", captured):
         await console.handle_command("status")
 
     output = captured.getvalue()
