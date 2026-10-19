@@ -3,7 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from tarveri.cogs.verification_cog import MAX_CONCURRENT_JOIN_HANDLERS, VerificationCog
+from tarveri.cogs.verification_cog import (
+    MASS_JOIN_ALERT_THRESHOLD,
+    MAX_CONCURRENT_JOIN_HANDLERS,
+    VerificationCog,
+)
 from tarveri.database import Database
 from tarveri.rate_limiter import RateLimiter
 from tarveri.services.verification_service import VerificationService
@@ -36,6 +40,33 @@ async def test_join_handlers_never_exceed_concurrency_cap(db):
 
     assert cog._handle_member_join.await_count == 60
     assert peak == MAX_CONCURRENT_JOIN_HANDLERS
+
+
+async def test_mass_join_alert_fires_once_per_cooldown(db):
+    service = MagicMock(spec=VerificationService)
+    service.send_admin_security_alert = AsyncMock()
+    cog = VerificationCog(MagicMock(), db, service, RateLimiter())
+    cog._handle_member_join = AsyncMock()
+    guild = MagicMock(id=987, name="Raid Test Guild")
+
+    for i in range(MASS_JOIN_ALERT_THRESHOLD + 5):
+        await cog.on_member_join(MagicMock(id=i, guild=guild))
+
+    assert service.send_admin_security_alert.await_count == 1
+    assert cog._handle_member_join.await_count == MASS_JOIN_ALERT_THRESHOLD + 5
+
+
+async def test_no_mass_join_alert_below_threshold(db):
+    service = MagicMock(spec=VerificationService)
+    service.send_admin_security_alert = AsyncMock()
+    cog = VerificationCog(MagicMock(), db, service, RateLimiter())
+    cog._handle_member_join = AsyncMock()
+    guild = MagicMock(id=988, name="Quiet Guild")
+
+    for i in range(MASS_JOIN_ALERT_THRESHOLD - 1):
+        await cog.on_member_join(MagicMock(id=i, guild=guild))
+
+    service.send_admin_security_alert.assert_not_awaited()
 
 
 async def test_audit_rows_batch_until_flush(db):

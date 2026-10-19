@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from datetime import datetime
 
 import discord
@@ -56,6 +57,9 @@ from tarveri.views.verification_views import (
 logger = logging.getLogger("tarveri")
 
 MAX_CONCURRENT_JOIN_HANDLERS = 5
+MASS_JOIN_WINDOW_SECONDS = 60
+MASS_JOIN_ALERT_THRESHOLD = 20
+MASS_JOIN_ALERT_COOLDOWN_SECONDS = 600
 
 __all__ = [
     "AlumniClaimModal",
@@ -98,6 +102,8 @@ class VerificationCog(commands.Cog, name="Verification"):
         self._lifecycle_cooldowns: dict[int, float] = {}
         self._guild_channels_cache: dict[int, tuple[int | None, int | None]] = {}
         self._join_gate = asyncio.Semaphore(MAX_CONCURRENT_JOIN_HANDLERS)
+        self._recent_joins: dict[int, deque[float]] = {}
+        self._mass_join_alerted_at: dict[int, float] = {}
 
     @app_commands.command(
         name="verify",
@@ -659,8 +665,43 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        await self._check_mass_join(member.guild)
         async with self._join_gate:
             await self._handle_member_join(member)
+
+    async def _check_mass_join(self, guild: discord.Guild) -> None:
+        now = time.monotonic()
+        joins = self._recent_joins.setdefault(guild.id, deque())
+        joins.append(now)
+        while joins and now - joins[0] > MASS_JOIN_WINDOW_SECONDS:
+            joins.popleft()
+        if len(joins) < MASS_JOIN_ALERT_THRESHOLD:
+            return
+        last_alert = self._mass_join_alerted_at.get(guild.id)
+        if last_alert is not None and now - last_alert < MASS_JOIN_ALERT_COOLDOWN_SECONDS:
+            return
+        self._mass_join_alerted_at[guild.id] = now
+
+        await self.db.log(
+            "WARNING",
+            "MASS_JOIN_DETECTED",
+            f"{len(joins)} members joined '{guild.name}' within {MASS_JOIN_WINDOW_SECONDS}s",
+            guild=guild,
+        )
+        alert_embed = discord.Embed(
+            title="⚠️ Mass Join Detected",
+            description=(
+                f"**{len(joins)}** members joined **{guild.name}** in the last "
+                f"{MASS_JOIN_WINDOW_SECONDS} seconds. Auto-verification is still running; "
+                "check for a raid."
+            ),
+            color=discord.Color.orange(),
+        )
+        alert_embed.set_footer(text="TARVeri Security Guard • Mass Join")
+        try:
+            await self.service.send_admin_security_alert(guild, alert_embed)
+        except Exception as alert_exc:
+            logger.warning(f"Failed sending mass join alert: {alert_exc}")
 
     async def _handle_member_join(self, member: discord.Member) -> None:
         """Automatically assigns faculty, campus, study level, and alumni roles if member is already verified, else prompts and tags."""
