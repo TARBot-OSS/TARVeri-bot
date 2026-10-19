@@ -202,6 +202,7 @@ For full architectural breakdowns, security models, and operational runbooks, ex
 * 🎟️ [**Guest Onboarding & Review**](docs/guest-workflow.md) — Referral vouchers, private review threads, and auto-escalation.
 * 🛡️ [**Administrator Manual**](docs/admin-manual.md) — Interactive dashboard, diagnostics, role backfilling, and command matrix.
 * 🏗️ [**Architecture & Resilience**](docs/architecture-and-resilience.md) — SQLite WAL, Litestream replication, Sentry telemetry, and Circuit Breaker failover.
+* 🤝 [**TARClub Society Bridge**](docs/society-bridge.md) — Shared secret, pairing tokens, and linking a society server.
 
 ---
 
