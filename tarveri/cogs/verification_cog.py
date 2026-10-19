@@ -4,6 +4,7 @@ Discord UI and Commands for Student Verification.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -54,6 +55,8 @@ from tarveri.views.verification_views import (
 
 logger = logging.getLogger("tarveri")
 
+MAX_CONCURRENT_JOIN_HANDLERS = 5
+
 __all__ = [
     "AlumniClaimModal",
     "AlumniEmailConfirmationView",
@@ -94,6 +97,7 @@ class VerificationCog(commands.Cog, name="Verification"):
         self._tip_cooldowns: dict[int, float] = {}
         self._lifecycle_cooldowns: dict[int, float] = {}
         self._guild_channels_cache: dict[int, tuple[int | None, int | None]] = {}
+        self._join_gate = asyncio.Semaphore(MAX_CONCURRENT_JOIN_HANDLERS)
 
     @app_commands.command(
         name="verify",
@@ -655,6 +659,10 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        async with self._join_gate:
+            await self._handle_member_join(member)
+
+    async def _handle_member_join(self, member: discord.Member) -> None:
         """Automatically assigns faculty, campus, study level, and alumni roles if member is already verified, else prompts and tags."""
         # 0. Blacklist guard: check if user is blacklisted in this guild
         match = await self.db.get_blacklist_match(member.guild.id, user_id=member.id)

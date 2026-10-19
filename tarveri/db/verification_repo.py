@@ -470,6 +470,7 @@ class VerificationRepoMixin(BaseRepoMixin):
     ) -> list[tuple[str, str, str, str | None, int | None, str]]:
         if not self._conn:
             raise RuntimeError("Database connection is not open.")
+        await self.flush_audit_log()
 
         if event_type:
             cursor = await self._conn.execute(
@@ -496,6 +497,7 @@ class VerificationRepoMixin(BaseRepoMixin):
         """Retrieves audit log entries specifically associated with a user ID."""
         if not self._conn:
             raise RuntimeError("Database connection is not open.")
+        await self.flush_audit_log()
         cursor = await self._conn.execute(
             """SELECT timestamp, level, event_type, guild_name, user_id, message
                FROM audit_log

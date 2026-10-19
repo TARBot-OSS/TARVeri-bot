@@ -4,6 +4,7 @@ Asynchronous SQLite database layer with WAL mode, indexing, schema versioning, a
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import logging
 import os
@@ -254,9 +255,14 @@ class Database(
     Uses SQLite WAL mode for non-blocking concurrent reads during verification writes.
     """
 
+    AUDIT_FLUSH_BATCH_SIZE = 50
+    AUDIT_FLUSH_INTERVAL_SECONDS = 2.0
+
     def __init__(self, path: str):
         self.path = path
         self._conn: aiosqlite.Connection | None = None
+        self._audit_buffer: list[tuple[Any, ...]] = []
+        self._audit_flush_task: asyncio.Task[None] | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -661,6 +667,10 @@ class Database(
 
     async def close(self) -> None:
         """Flushes SQLite WAL to disk and closes the connection cleanly."""
+        if self._audit_flush_task is not None:
+            self._audit_flush_task.cancel()
+            self._audit_flush_task = None
+        await self.flush_audit_log()
         if self._conn:
             try:
                 # Flush write-ahead log (WAL) into the main database file non-blockingly
@@ -982,24 +992,32 @@ class Database(
             except (ValueError, TypeError, AttributeError):
                 u_id = None
 
+        self._audit_buffer.append((ts, level, event_type, g_id, g_name, u_id, message))
+        if self._audit_flush_task is None:
+            self._audit_flush_task = asyncio.create_task(self._audit_flush_loop())
+        if len(self._audit_buffer) >= self.AUDIT_FLUSH_BATCH_SIZE:
+            await self.flush_audit_log()
+
+    async def flush_audit_log(self) -> None:
+        """Write buffered audit rows in one transaction."""
+        if not self._conn or not self._audit_buffer:
+            return
+        rows, self._audit_buffer = self._audit_buffer, []
         try:
             async with self.transaction() as conn:
-                await conn.execute(
+                await conn.executemany(
                     """INSERT INTO audit_log
                        (timestamp, level, event_type, guild_id, guild_name, user_id, message)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        ts,
-                        level,
-                        event_type,
-                        g_id,
-                        g_name,
-                        u_id,
-                        message,
-                    ),
+                    rows,
                 )
         except Exception as e:
-            logger.error(f"Failed to insert audit log entry into DB: {e}")
+            logger.error(f"Failed to insert {len(rows)} audit log entries into DB: {e}")
+
+    async def _audit_flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.AUDIT_FLUSH_INTERVAL_SECONDS)
+            await self.flush_audit_log()
 
     # =========================================================================
     # 🔐 Console Backend Admin Accounts
