@@ -10,6 +10,7 @@ The TUI, PAM login and session handling live in the shared `tarbot_console` pack
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import discord
@@ -65,21 +66,30 @@ HELP_LINES = [
 ]
 
 
-class _FacultyAfterVerifyCompleter(Completer):
-    """Offers FACULTY_CODES for the word after `verify <x>`, then defers to the core completer."""
+class _ArgumentCompleter(Completer):
+    """Offers the words `rule` returns for an argument slot, else defers to the core completer."""
 
-    def __init__(self, base: Completer) -> None:
+    def __init__(self, base: Completer, rule: Callable[[list[str]], list[str] | None]) -> None:
         self.base = base
+        self.rule = rule
 
     def get_completions(self, document, complete_event):
         word = document.get_word_before_cursor(WORD=True)
         head = document.text_before_cursor[: len(document.text_before_cursor) - len(word)].split()
-        if len(head) == 2 and head[0] == "verify":
-            for code in FACULTY_CODES:
-                if code.startswith(word.upper()):
-                    yield Completion(code, start_position=-len(word))
+        options = self.rule(head)
+        if options is None:
+            yield from self.base.get_completions(document, complete_event)
             return
-        yield from self.base.get_completions(document, complete_event)
+        for option in options:
+            if option.lower().startswith(word.lower()):
+                yield Completion(option, start_position=-len(word))
+
+
+def _verify_argument_options(head: list[str]) -> list[str] | None:
+    # `verify <student_id> <faculty-slot>`: the original readline completer offered faculty here.
+    if len(head) == 2 and head[0] == "verify":
+        return FACULTY_CODES
+    return None
 
 
 class ConsoleService(ConsoleCore):
@@ -112,7 +122,7 @@ class ConsoleService(ConsoleCore):
 
     def _get_completer(self) -> Completer | None:
         base = super()._get_completer()
-        return _FacultyAfterVerifyCompleter(base) if base is not None else None
+        return _ArgumentCompleter(base, _verify_argument_options) if base is not None else None
 
     def eval_scope(self) -> dict[str, Any]:
         return {**super().eval_scope(), "service": self.service}
