@@ -10,10 +10,10 @@ The TUI, PAM login and session handling live in the shared `tarbot_console` pack
 from __future__ import annotations
 
 import logging
-import shlex
 from typing import TYPE_CHECKING, Any
 
 import discord
+from prompt_toolkit.completion import Completer, Completion
 from tarbot_console import ConsoleCore
 
 from tarveri.config import hash_student_id, parse_student_id
@@ -26,56 +26,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tarveri.console")
 
-
-AVAILABLE_COMMANDS = [
-    "help",
-    "status",
-    "guilds",
-    "stats",
-    "lookup",
-    "verify",
-    "unverify",
-    "backup",
-    "say",
-    "broadcast",
-    "eval",
-    "login",
-    "setup-admin",
-    "lock",
-    "logout",
-    "user",
-    "view",
-    "minimize",
-    "restore",
-    "clear",
-    "stop",
-    "exit",
-    "quit",
-]
-
-AUTH_LOCKED_COMMANDS = [
-    "help",
-    "?",
-    "login",
-    "setup-admin",
-    "view",
-    "minimize",
-    "restore",
-    "clear",
-    "stop",
-    "exit",
-    "quit",
-]
-
-SUBCOMMAND_OPTIONS: dict[str, list[str]] = {
-    "stats": ["overview", "faculties"],
-    "backup": ["snapshot", "manual"],
-    "user": ["list", "add", "remove"],
-    "view": ["split", "logs", "output"],
-    "minimize": ["output", "logs"],
-    "restore": ["all", "output", "logs"],
-    "clear": ["output", "logs", "all"],
-}
 
 FACULTY_CODES = [
     "FOCS",
@@ -115,32 +65,21 @@ HELP_LINES = [
 ]
 
 
-def _console_completer(text: str, state: int) -> str | None:
-    try:
-        import readline
+class _FacultyAfterVerifyCompleter(Completer):
+    """Offers FACULTY_CODES for the word after `verify <x>`, then defers to the core completer."""
 
-        buf = readline.get_line_buffer()
-        begidx = readline.get_begidx()
-        text_before = buf[:begidx].strip()
-        try:
-            words = shlex.split(text_before)
-        except ValueError:
-            words = text_before.split()
-    except Exception:
-        words = []
+    def __init__(self, base: Completer) -> None:
+        self.base = base
 
-    matches: list[str] = []
-    if not words:
-        matches = [c for c in AVAILABLE_COMMANDS if c.startswith(text.lower())]
-    elif len(words) == 1 and words[0] in SUBCOMMAND_OPTIONS:
-        matches = [opt for opt in SUBCOMMAND_OPTIONS[words[0]] if opt.startswith(text.lower())]
-    elif words[0] == "verify" and len(words) == 2:
-        matches = [f for f in FACULTY_CODES if f.startswith(text.upper())]
-
-    if state < len(matches):
-        return matches[state]
-    return None
-
+    def get_completions(self, document, complete_event):
+        word = document.get_word_before_cursor(WORD=True)
+        head = document.text_before_cursor[: len(document.text_before_cursor) - len(word)].split()
+        if len(head) == 2 and head[0] == "verify":
+            for code in FACULTY_CODES:
+                if code.startswith(word.upper()):
+                    yield Completion(code, start_position=-len(word))
+            return
+        yield from self.base.get_completions(document, complete_event)
 
 
 class ConsoleService(ConsoleCore):
@@ -170,6 +109,10 @@ class ConsoleService(ConsoleCore):
     ) -> None:
         self.service = service
         super().__init__(bot, db, settings)
+
+    def _get_completer(self) -> Completer | None:
+        base = super()._get_completer()
+        return _FacultyAfterVerifyCompleter(base) if base is not None else None
 
     def eval_scope(self) -> dict[str, Any]:
         return {**super().eval_scope(), "service": self.service}

@@ -198,23 +198,31 @@ async def test_console_service_clear_command(mock_bot, mock_service, tmp_path):
     await db.close()
 
 
-def test_console_service_completer():
-    from tarveri.services.console_service import _console_completer
+def _completions(console, text: str) -> list[str]:
+    from prompt_toolkit.document import Document
 
-    with patch("readline.get_line_buffer", return_value=""), patch("readline.get_begidx", return_value=0):
-        # Empty line: matches top-level commands
-        first = _console_completer("", 0)
-        assert first in ("help", "status", "guilds", "stats", "lookup", "verify", "unverify", "backup", "say", "broadcast", "eval", "clear", "stop", "exit", "quit")
+    completer = console._get_completer()
+    return [c.text for c in completer.get_completions(Document(text), None)]
 
-    with patch("readline.get_line_buffer", return_value="stats "), patch("readline.get_begidx", return_value=6):
-        # Subcommand stats options
-        assert _console_completer("", 0) == "overview"
-        assert _console_completer("", 1) == "faculties"
 
-    with patch("readline.get_line_buffer", return_value="backup "), patch("readline.get_begidx", return_value=7):
-        # Subcommand backup options
-        assert _console_completer("", 0) == "snapshot"
-        assert _console_completer("", 1) == "manual"
+def test_console_completer_offers_faculty_codes_after_verify_student_id(mock_bot, mock_service):
+    from tarveri.services.console_service import FACULTY_CODES
+
+    settings = Settings(bot_token="test", id_hash_secret="secret123")
+    console = ConsoleService(mock_bot, MagicMock(), mock_service, settings)
+
+    assert _completions(console, "verify 23WMD09867 ") == FACULTY_CODES
+    assert _completions(console, "verify 23WMD09867 f") == [c for c in FACULTY_CODES if c.startswith("F")]
+    # Command position and the first argument are not faculty slots.
+    assert _completions(console, "verify ") == []
+    assert _completions(console, "verify 23WMD09867") == []
+
+
+def test_console_completer_keeps_core_subcommand_options(mock_bot, mock_service):
+    settings = Settings(bot_token="test", id_hash_secret="secret123")
+    console = ConsoleService(mock_bot, MagicMock(), mock_service, settings)
+
+    assert _completions(console, "clear ") == ["output", "logs", "all"]
 
 
 def test_console_service_escable_help(mock_bot, mock_service, tmp_path):
