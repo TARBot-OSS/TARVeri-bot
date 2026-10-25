@@ -698,7 +698,7 @@ class Database(
         row = await cursor.fetchone()
         current_version = row[0] if row else 0
 
-        if current_version == 0:
+        if current_version < SCHEMA_VERSION:
             await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
 
     async def load_runtime_settings(self) -> None:
