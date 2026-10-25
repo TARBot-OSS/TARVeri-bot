@@ -9,3 +9,5 @@ sentry-sdk>=2.0
 prompt_toolkit>=3.0.0
 python-pam>=2.0.0
 tarbot-console @ git+https://github.com/TARBot-OSS/tarbot-console.git@v0.1.1
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

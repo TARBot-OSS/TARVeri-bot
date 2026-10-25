@@ -1,0 +1,650 @@
+[
+  {
+    "default_permissions": null,
+    "description": null,
+    "kind": "context_menu",
+    "name": "View Campus Card",
+    "type": "user"
+  },
+  {
+    "children": [
+      {
+        "default_permissions": "8",
+        "description": "Revoke a member's graduated alumni status and remove TARUMT Alumni role.",
+        "kind": "command",
+        "name": "alumni_revoke",
+        "parameters": [
+          {
+            "name": "user",
+            "required": true,
+            "type": "user"
+          },
+          {
+            "name": "reason",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Query recent audit log entries.",
+        "kind": "command",
+        "name": "audit",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "name": "event_type",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "One-time migration: backfill branch campus & study level roles to previously verified students.",
+        "kind": "command",
+        "name": "backfill_roles",
+        "parameters": [
+          {
+            "name": "default_campus",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "default_level",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "all_servers",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Manage SQLite database snapshots, backups, and settings restoration.",
+        "kind": "command",
+        "name": "backup",
+        "parameters": [
+          {
+            "name": "action",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "backup_file",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "children": [
+          {
+            "default_permissions": "8",
+            "description": "Clear all blacklist entries for this server.",
+            "kind": "command",
+            "name": "clear",
+            "parameters": []
+          },
+          {
+            "default_permissions": "8",
+            "description": "Blacklist an institutional student email from verifying in this server.",
+            "kind": "command",
+            "name": "email",
+            "parameters": [
+              {
+                "name": "email",
+                "required": true,
+                "type": "string"
+              },
+              {
+                "name": "reason",
+                "required": false,
+                "type": "string"
+              }
+            ]
+          },
+          {
+            "default_permissions": "8",
+            "description": "View blacklisted entries for this server.",
+            "kind": "command",
+            "name": "list",
+            "parameters": [
+              {
+                "name": "target_type",
+                "required": false,
+                "type": "string"
+              },
+              {
+                "name": "page",
+                "required": false,
+                "type": "integer"
+              }
+            ]
+          },
+          {
+            "default_permissions": "8",
+            "description": "Remove a target (User ID, Student ID, or Email) from this server's blacklist.",
+            "kind": "command",
+            "name": "remove",
+            "parameters": [
+              {
+                "name": "target_type",
+                "required": true,
+                "type": "string"
+              },
+              {
+                "name": "target",
+                "required": true,
+                "type": "string"
+              }
+            ]
+          },
+          {
+            "default_permissions": "8",
+            "description": "Blacklist a Student ID from verifying in this server.",
+            "kind": "command",
+            "name": "student_id",
+            "parameters": [
+              {
+                "name": "student_id",
+                "required": true,
+                "type": "string"
+              },
+              {
+                "name": "reason",
+                "required": false,
+                "type": "string"
+              }
+            ]
+          },
+          {
+            "default_permissions": "8",
+            "description": "Blacklist a Discord user from verifying or holding verified roles in this server.",
+            "kind": "command",
+            "name": "user",
+            "parameters": [
+              {
+                "name": "user",
+                "required": true,
+                "type": "user"
+              },
+              {
+                "name": "reason",
+                "required": false,
+                "type": "string"
+              }
+            ]
+          }
+        ],
+        "default_permissions": null,
+        "description": "Per-server blacklist management for Discord users, Student IDs, and emails.",
+        "kind": "group",
+        "name": "blacklist"
+      },
+      {
+        "default_permissions": "8",
+        "description": "Manually close a guest review ticket thread without kicking the applicant.",
+        "kind": "command",
+        "name": "close_ticket",
+        "parameters": [
+          {
+            "name": "reason",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "ticket",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Open the interactive TARVeri Administrator Control Center dashboard.",
+        "kind": "command",
+        "name": "dashboard",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Run self-healing diagnostics and verify server permissions, roles, and channels.",
+        "kind": "command",
+        "name": "diagnose",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Toggle retroactive role stripping for non-email-verified members during self-healing.",
+        "kind": "command",
+        "name": "email_enforcement",
+        "parameters": [
+          {
+            "name": "enabled",
+            "required": true,
+            "type": "boolean"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Configure whether student email OTP verification is required in this server.",
+        "kind": "command",
+        "name": "email_verification",
+        "parameters": [
+          {
+            "name": "enabled",
+            "required": true,
+            "type": "boolean"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Inspect daily log files, view compressed 10-day archives, or trigger log rotation.",
+        "kind": "command",
+        "name": "logs",
+        "parameters": [
+          {
+            "name": "action",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Inspect, approve, or reject suspended mass role revocation actions.",
+        "kind": "command",
+        "name": "mass_revocation",
+        "parameters": [
+          {
+            "name": "action",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "action_id",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Deploy the persistent 3-button verification gateway panel.",
+        "kind": "command",
+        "name": "panel",
+        "parameters": [
+          {
+            "name": "channel",
+            "required": false,
+            "type": "channel"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Immediately restore and recover missing verified roles for past verified members.",
+        "kind": "command",
+        "name": "restore_roles",
+        "parameters": [
+          {
+            "name": "user",
+            "required": false,
+            "type": "user"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Force resynchronization of verification roles.",
+        "kind": "command",
+        "name": "resync",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Configure or reset welcome, help, or guest review channels for this server.",
+        "kind": "command",
+        "name": "set_channel",
+        "parameters": [
+          {
+            "name": "channel_type",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "channel",
+            "required": false,
+            "type": "channel"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Configure or reset custom guest role or reviewer/admin role.",
+        "kind": "command",
+        "name": "set_role",
+        "parameters": [
+          {
+            "name": "role_type",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "role",
+            "required": false,
+            "type": "role"
+          },
+          {
+            "name": "role_name",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Configure, enable, disable, or remove faculty SRC roles in this server.",
+        "kind": "command",
+        "name": "src",
+        "parameters": [
+          {
+            "name": "action",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "View student verification statistics and server metrics.",
+        "kind": "command",
+        "name": "stats",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Synchronize application slash commands with Discord.",
+        "kind": "command",
+        "name": "sync_commands",
+        "parameters": [
+          {
+            "name": "clean_duplicates",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "guild_only",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "List and inspect recent guest review tickets with links to threads.",
+        "kind": "command",
+        "name": "tickets",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Unlink a member's student ID and revoke faculty roles.",
+        "kind": "command",
+        "name": "unverify",
+        "parameters": [
+          {
+            "name": "user",
+            "required": true,
+            "type": "user"
+          },
+          {
+            "name": "reason",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Check if bot updates are available from git upstream.",
+        "kind": "command",
+        "name": "updates",
+        "parameters": [
+          {
+            "name": "stream",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "View continuous bot uptime, downtime detection history, and SLA availability scores.",
+        "kind": "command",
+        "name": "uptime",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Inspect member verification profile, student roles, join date, and audit history.",
+        "kind": "command",
+        "name": "user_info",
+        "parameters": [
+          {
+            "name": "user",
+            "required": true,
+            "type": "user"
+          }
+        ]
+      }
+    ],
+    "default_permissions": "8",
+    "description": "TARVeri Administrator Control Center and Server Operations",
+    "kind": "group",
+    "name": "admin"
+  },
+  {
+    "default_permissions": null,
+    "description": "Display your official TARUMT Digital Campus ID card and verified badges.",
+    "kind": "command",
+    "name": "card",
+    "parameters": [
+      {
+        "name": "member",
+        "required": false,
+        "type": "user"
+      },
+      {
+        "name": "hidden",
+        "required": false,
+        "type": "boolean"
+      }
+    ]
+  },
+  {
+    "default_permissions": null,
+    "description": "Discontinue your student status and withdraw student verification roles.",
+    "kind": "command",
+    "name": "dropout",
+    "parameters": []
+  },
+  {
+    "default_permissions": null,
+    "description": "Claim your official TARUMT Alumni status and unlock the Alumni role & card badge.",
+    "kind": "command",
+    "name": "graduate",
+    "parameters": [
+      {
+        "name": "year",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "programme",
+        "required": false,
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "default_permissions": null,
+    "description": "Submit your 6-digit email verification code to complete student verification.",
+    "kind": "command",
+    "name": "otp",
+    "parameters": [
+      {
+        "name": "code",
+        "required": true,
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "children": [
+      {
+        "default_permissions": "32",
+        "description": "Open the Admin Dashboard for Random Tagging",
+        "kind": "command",
+        "name": "dashboard",
+        "parameters": []
+      }
+    ],
+    "default_permissions": "32",
+    "description": "Admin controls for randomized user tagging in #general",
+    "kind": "group",
+    "name": "randomtag"
+  },
+  {
+    "children": [
+      {
+        "default_permissions": null,
+        "description": "Generate a guest referral code for a friend (Verified Students only).",
+        "kind": "command",
+        "name": "generate",
+        "parameters": [
+          {
+            "name": "ttl_hours",
+            "required": false,
+            "type": "integer"
+          }
+        ]
+      },
+      {
+        "default_permissions": null,
+        "description": "View your active and past referral codes.",
+        "kind": "command",
+        "name": "list",
+        "parameters": []
+      }
+    ],
+    "default_permissions": null,
+    "description": "Commands to generate and manage guest referral codes",
+    "kind": "group",
+    "name": "referral"
+  },
+  {
+    "default_permissions": "8",
+    "description": "Send the interactive 3-button verification gateway panel to a channel.",
+    "kind": "command",
+    "name": "send_gateway_panel",
+    "parameters": [
+      {
+        "name": "channel",
+        "required": false,
+        "type": "channel"
+      }
+    ]
+  },
+  {
+    "children": [
+      {
+        "default_permissions": "8",
+        "description": "List all paired TARClub society servers and their link status.",
+        "kind": "command",
+        "name": "list",
+        "parameters": []
+      },
+      {
+        "default_permissions": "8",
+        "description": "Generate a secure cross-bot pairing token for a TARClub society server.",
+        "kind": "command",
+        "name": "pair",
+        "parameters": [
+          {
+            "name": "society_guild_id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "notes",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "default_permissions": "8",
+        "description": "Revoke pairing with a TARClub society server.",
+        "kind": "command",
+        "name": "unpair",
+        "parameters": [
+          {
+            "name": "society_guild_id",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "default_permissions": "8",
+    "description": "TARClub society cross-bot integration commands",
+    "kind": "group",
+    "name": "society_bridge"
+  },
+  {
+    "default_permissions": null,
+    "description": "Verify your TARUMT student status and receive your faculty role.",
+    "kind": "command",
+    "name": "verify",
+    "parameters": [
+      {
+        "name": "student_id",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "email",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "expiry_date",
+        "required": false,
+        "type": "string"
+      }
+    ]
+  }
+]

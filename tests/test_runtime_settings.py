@@ -67,9 +67,7 @@ async def test_corrupt_stored_value_falls_back_to_default(tmp_path):
     path = str(tmp_path / "corrupt.db")
     database = Database(path)
     await database.connect()
-    await database._conn.execute(
-        "INSERT INTO runtime_settings (key, value) VALUES ('mass_join_threshold', 'lots');"
-    )
+    await database._conn.execute("INSERT INTO runtime_settings (key, value) VALUES ('mass_join_threshold', 'lots');")
     await database._conn.commit()
     await database.load_runtime_settings()
 
