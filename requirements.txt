@@ -8,4 +8,4 @@ pybreaker>=1.4
 sentry-sdk>=2.0
 prompt_toolkit>=3.0.0
 python-pam>=2.0.0
-tarbot-console @ git+https://github.com/TARBot-OSS/tarbot-console.git@v0.1.0
+tarbot-console @ git+https://github.com/TARBot-OSS/tarbot-console.git@v0.1.1
