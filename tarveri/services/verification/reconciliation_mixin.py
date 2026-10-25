@@ -28,6 +28,35 @@ logger = logging.getLogger("tarveri")
 
 
 class ReconciliationMixin(BaseVerificationMixin):
+    async def _reconciliation_context(self, guild: discord.Guild) -> tuple[bool, int, bool, bool]:
+        """Returns (bot can manage roles, bot top role position, guild requires email, guild enforces email)."""
+        me = getattr(guild, "me", None)
+        if not me and hasattr(guild, "get_member") and hasattr(self.bot, "user") and self.bot.user:
+            me = guild.get_member(self.bot.user.id)
+        if not me and hasattr(guild, "fetch_member") and hasattr(self.bot, "user") and self.bot.user:
+            try:
+                me = await guild.fetch_member(self.bot.user.id)
+            except Exception:
+                me = None
+        can_manage = (
+            getattr(me.guild_permissions, "manage_roles", False) if me and hasattr(me, "guild_permissions") else False
+        )
+        bot_top_role = getattr(me, "top_role", None) if me else None
+        bot_pos = getattr(bot_top_role, "position", 0) if bot_top_role else 0
+
+        guild_email_required = False
+        guild_email_enforced = False
+        if self.db and hasattr(guild, "id"):
+            try:
+                guild_email_required = await self.db.is_guild_email_verification_enabled(guild.id)
+                guild_email_enforced = await self.db.is_guild_email_enforcement_enabled(guild.id)
+            except Exception as exc:
+                logger.debug("Failed checking guild email policy during reconciliation: %s", exc)
+
+        if not guild_email_enforced and self.settings:
+            guild_email_enforced = getattr(self.settings, "enable_email_role_enforcement", False)
+        return can_manage, bot_pos, guild_email_required, guild_email_enforced
+
     async def reconcile_verified_members(
         self,
         guild: discord.Guild,
@@ -63,31 +92,7 @@ class ReconciliationMixin(BaseVerificationMixin):
         if not all_verifications:
             all_verifications = []
 
-        me = getattr(guild, "me", None)
-        if not me and hasattr(guild, "get_member") and hasattr(self.bot, "user") and self.bot.user:
-            me = guild.get_member(self.bot.user.id)
-        if not me and hasattr(guild, "fetch_member") and hasattr(self.bot, "user") and self.bot.user:
-            try:
-                me = await guild.fetch_member(self.bot.user.id)
-            except Exception:
-                me = None
-        can_manage = (
-            getattr(me.guild_permissions, "manage_roles", False) if me and hasattr(me, "guild_permissions") else False
-        )
-        bot_top_role = getattr(me, "top_role", None) if me else None
-        bot_pos = getattr(bot_top_role, "position", 0) if bot_top_role else 0
-
-        guild_email_required = False
-        guild_email_enforced = False
-        if self.db and hasattr(guild, "id"):
-            try:
-                guild_email_required = await self.db.is_guild_email_verification_enabled(guild.id)
-                guild_email_enforced = await self.db.is_guild_email_enforcement_enabled(guild.id)
-            except Exception as exc:
-                logger.debug("Failed checking guild email policy during reconciliation: %s", exc)
-
-        if not guild_email_enforced and self.settings:
-            guild_email_enforced = getattr(self.settings, "enable_email_role_enforcement", False)
+        can_manage, bot_pos, guild_email_required, guild_email_enforced = await self._reconciliation_context(guild)
 
         verified_user_ids: set[int] = set()
         email_strip_candidates: list[tuple[discord.Member, list[discord.Role]]] = []

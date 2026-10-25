@@ -245,67 +245,8 @@ def list_backups(backup_dir: str = "backups") -> list[dict[str, Any]]:
     return backup_files
 
 
-class Database(
-    VerificationRepoMixin,
-    GuildSettingsRepoMixin,
-    GuestRepoMixin,
-    BlacklistRepoMixin,
-    MassActionRepoMixin,
-    UptimeRepoMixin,
-    DeadLetterRepoMixin,
-    SocietyBridgeRepoMixin,
-):
-    """
-    Database interface for TARVeri.
-    Uses SQLite WAL mode for non-blocking concurrent reads during verification writes.
-    """
-
-    def __init__(self, path: str):
-        self.path = path
-        self._conn: aiosqlite.Connection | None = None
-        self._audit_buffer: list[tuple[Any, ...]] = []
-        self._audit_flush_task: asyncio.Task[None] | None = None
-        self.runtime_settings: dict[str, float | int] = default_runtime_values()
-
-    @property
-    def is_connected(self) -> bool:
-        return self._conn is not None
-
-    async def connect(self) -> None:
-        """Establishes connection, verifies schema version, and creates schema and indexes."""
-        if self._conn:
-            return
-
-        self._conn = await aiosqlite.connect(self.path, timeout=60.0)
-        await self._conn.execute("PRAGMA busy_timeout = 60000;")
-        await self._conn.execute("PRAGMA foreign_keys = ON;")
-        # WAL mode lets reads (e.g. admin queries on audit_log) proceed without
-        # blocking on writes (verifications), which matters as guild count grows.
-        await self._conn.execute("PRAGMA journal_mode = WAL;")
-        await self._conn.execute("PRAGMA synchronous = NORMAL;")
-        await self._conn.execute("PRAGMA cache_size = -4000;")  # 4MB in-memory page cache
-        await self._conn.execute("PRAGMA temp_store = MEMORY;")  # Keep temp tables & sorts in RAM
-        await self._conn.execute("PRAGMA mmap_size = 67108864;")  # 64MB memory-mapped I/O
-
-        # Self-healing: verify database integrity upon connection
-        try:
-            cursor = await self._conn.execute("PRAGMA integrity_check;")
-            rows = await cursor.fetchall()
-            if rows == [("ok",)]:
-                logger.debug("Database integrity check passed (ok).")
-            else:
-                logger.error(f"Database integrity check issue detected: {rows}")
-        except Exception as e:
-            logger.warning(f"Could not execute database integrity check: {e}")
-
-        # Checkpoint WAL on startup (PASSIVE mode to avoid blocking or requiring exclusive lock)
-        try:
-            await self._conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
-        except Exception as e:
-            logger.debug(f"Initial WAL checkpoint notice: {e}")
-
-        await self._conn.executescript(
-            """
+# Table DDL. Each statement is IF NOT EXISTS, so running it on an existing database is a no-op.
+_SCHEMA_TABLES_SQL = """
             CREATE TABLE IF NOT EXISTS verifications (
                 discord_user_id INTEGER PRIMARY KEY,
                 student_id_hash TEXT UNIQUE NOT NULL,
@@ -489,7 +430,10 @@ class Database(
                 updated_by INTEGER,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+"""
 
+# Indexes run after the column migrations, so they can use columns that older databases lack.
+_SCHEMA_INDEXES_SQL = """
             CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type);
             CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
             CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);
@@ -511,14 +455,17 @@ class Database(
             CREATE INDEX IF NOT EXISTS idx_dlq_status_next ON dead_letter_queue(status, next_retry_at);
             CREATE INDEX IF NOT EXISTS idx_dlq_type_status ON dead_letter_queue(queue_type, status);
             CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON dead_letter_queue(created_at);
-            """
-        )
+CREATE INDEX IF NOT EXISTS idx_verifications_alumni ON verifications(is_alumni);
+CREATE INDEX IF NOT EXISTS idx_verifications_expiry ON verifications(card_expiry_date);
+CREATE INDEX IF NOT EXISTS idx_verifications_expiry_alumni ON verifications(is_alumni, card_expiry_date);
+CREATE INDEX IF NOT EXISTS idx_verifications_email_hash ON verifications(student_email_hash);
+"""
 
-        # Migration helper for existing databases: ensure all expected columns exist
-        # 1. guild_settings
-        cursor = await self._conn.execute("PRAGMA table_info(guild_settings);")
-        existing_guild_cols = {row[1] for row in await cursor.fetchall()}
-        for col, col_def in [
+# Columns added to tables created by earlier releases, in order. Each is added only when missing.
+_COLUMN_MIGRATIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "guild_settings",
+        (
             ("welcome_channel_id", "INTEGER"),
             ("help_channel_id", "INTEGER"),
             ("guest_role_name", "TEXT DEFAULT 'Guest'"),
@@ -528,25 +475,19 @@ class Database(
             ("enforce_email_verification", "INTEGER DEFAULT 0"),
             ("enable_src_roles", "INTEGER DEFAULT 0"),
             ("updated_at", "TEXT DEFAULT ''"),
-        ]:
-            if col not in existing_guild_cols:
-                await self._conn.execute(f"ALTER TABLE guild_settings ADD COLUMN {col} {col_def};")
-
-        # 2. referral_codes
-        cursor = await self._conn.execute("PRAGMA table_info(referral_codes);")
-        existing_referral_cols = {row[1] for row in await cursor.fetchall()}
-        for col, col_def in [
+        ),
+    ),
+    (
+        "referral_codes",
+        (
             ("used_by_discord_id", "INTEGER"),
             ("used_at", "TEXT"),
             ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
-        ]:
-            if col not in existing_referral_cols:
-                await self._conn.execute(f"ALTER TABLE referral_codes ADD COLUMN {col} {col_def};")
-
-        # 3. guest_tickets
-        cursor = await self._conn.execute("PRAGMA table_info(guest_tickets);")
-        existing_ticket_cols = {row[1] for row in await cursor.fetchall()}
-        for col, col_def in [
+        ),
+    ),
+    (
+        "guest_tickets",
+        (
             ("ticket_seq", "INTEGER"),
             ("referrer_id", "INTEGER"),
             ("referral_code", "TEXT"),
@@ -560,14 +501,11 @@ class Database(
             ("close_reason", "TEXT"),
             ("pinged_admin_ids", "TEXT"),
             ("last_pinged_at", "TEXT"),
-        ]:
-            if col not in existing_ticket_cols:
-                await self._conn.execute(f"ALTER TABLE guest_tickets ADD COLUMN {col} {col_def};")
-
-        # 4. verifications (Alumni fields + Campus & Study Level fields + Expiry fields + Email fields + Programme Code)
-        cursor = await self._conn.execute("PRAGMA table_info(verifications);")
-        existing_veri_cols = {row[1] for row in await cursor.fetchall()}
-        for col, col_def in [
+        ),
+    ),
+    (
+        "verifications",
+        (
             ("is_alumni", "INTEGER DEFAULT 0"),
             ("graduated_year", "INTEGER"),
             ("programme", "TEXT"),
@@ -580,102 +518,188 @@ class Database(
             ("student_email_encrypted", "TEXT"),
             ("student_email_hash", "TEXT"),
             ("programme_code", "TEXT"),
-        ]:
-            if col not in existing_veri_cols:
-                await self._conn.execute(f"ALTER TABLE verifications ADD COLUMN {col} {col_def};")
+        ),
+    ),
+)
 
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_verifications_alumni ON verifications(is_alumni);")
-        await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_verifications_expiry ON verifications(card_expiry_date);"
+
+async def _apply_column_migrations(conn: aiosqlite.Connection) -> None:
+    """Adds any column from _COLUMN_MIGRATIONS that the table does not have yet."""
+    for table, columns in _COLUMN_MIGRATIONS:
+        cursor = await conn.execute(f"PRAGMA table_info({table});")
+        existing = {row[1] for row in await cursor.fetchall()}
+        for col, col_def in columns:
+            if col not in existing:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def};")
+
+
+async def _backfill_campus_code(conn: aiosqlite.Connection) -> None:
+    try:
+        cursor = await conn.execute(
+            """UPDATE verifications
+               SET campus_code = 'W'
+               WHERE campus_code IS NULL"""
         )
-        await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_verifications_expiry_alumni ON verifications(is_alumni, card_expiry_date);"
+        if cursor.rowcount > 0:
+            logger.info(
+                f"Migrated {cursor.rowcount} legacy student verification record(s) with default campus_code='W' (KL Main Campus)."
+            )
+    except Exception as e:
+        logger.debug(f"Legacy campus_code migration notice: {e}")
+
+
+async def _backfill_programme_code(conn: aiosqlite.Connection) -> None:
+    try:
+        cursor = await conn.execute(
+            """UPDATE verifications
+               SET programme_code = campus_code || faculty_code || COALESCE(level_code, 'R')
+               WHERE programme_code IS NULL AND campus_code IS NOT NULL AND faculty_code IS NOT NULL"""
         )
-        await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_verifications_email_hash ON verifications(student_email_hash);"
+        if cursor.rowcount > 0:
+            logger.info(f"Backfilled programme_code for {cursor.rowcount} verification record(s).")
+    except Exception as e:
+        logger.debug(f"Legacy programme_code backfill notice: {e}")
+
+
+async def _backfill_card_expiry(conn: aiosqlite.Connection) -> None:
+    try:
+        cursor = await conn.execute(
+            """SELECT discord_user_id, verified_at, level_code
+               FROM verifications
+               WHERE card_expiry_date IS NULL AND is_alumni = 0"""
         )
+        rows = await cursor.fetchall()
+        backfilled_count = 0
+        for u_id, v_at, lvl_code in rows:
+            calc_year = None
+            if v_at:
+                try:
+                    dt = datetime.fromisoformat(v_at.replace(" ", "T"))
+                    calc_year = dt.year
+                except (ValueError, TypeError):
+                    pass
+            if not calc_year:
+                calc_year = datetime.now().year
 
-        # 5. One-time data migration: Backfill legacy verifications missing campus_code to 'W' (KL Main Campus)
-        try:
-            cursor = await self._conn.execute(
-                """UPDATE verifications
-                   SET campus_code = 'W'
-                   WHERE campus_code IS NULL"""
+            lvl = (lvl_code or "R").upper()
+            if lvl == "F":
+                est_date = f"{calc_year + 1:04d}-05-31"
+            elif lvl == "D":
+                est_date = f"{calc_year + 2:04d}-10-31"
+            elif lvl == "R":
+                est_date = f"{calc_year + 3:04d}-10-31"
+            elif lvl == "P":
+                est_date = f"{calc_year + 2:04d}-10-31"
+            else:
+                est_date = f"{calc_year + 3:04d}-10-31"
+
+            await conn.execute(
+                "UPDATE verifications SET card_expiry_date = ? WHERE discord_user_id = ?",
+                (est_date, u_id),
             )
-            if cursor.rowcount > 0:
-                logger.info(
-                    f"Migrated {cursor.rowcount} legacy student verification record(s) with default campus_code='W' (KL Main Campus)."
-                )
-        except Exception as e:
-            logger.debug(f"Legacy campus_code migration notice: {e}")
+            backfilled_count += 1
 
-        # Backfill programme_code if missing but campus/faculty available
-        try:
-            cursor = await self._conn.execute(
-                """UPDATE verifications
-                   SET programme_code = campus_code || faculty_code || COALESCE(level_code, 'R')
-                   WHERE programme_code IS NULL AND campus_code IS NOT NULL AND faculty_code IS NOT NULL"""
+        if backfilled_count > 0:
+            logger.info(
+                f"Backfilled estimated card_expiry_date for {backfilled_count} legacy student verification record(s)."
             )
-            if cursor.rowcount > 0:
-                logger.info(f"Backfilled programme_code for {cursor.rowcount} verification record(s).")
-        except Exception as e:
-            logger.debug(f"Legacy programme_code backfill notice: {e}")
+    except Exception as e:
+        logger.debug(f"Legacy card_expiry_date migration notice: {e}")
 
-        # 6. One-time data migration: Backfill legacy active student verifications missing card_expiry_date
-        try:
-            cursor = await self._conn.execute(
-                """SELECT discord_user_id, verified_at, level_code
-                   FROM verifications
-                   WHERE card_expiry_date IS NULL AND is_alumni = 0"""
-            )
-            rows = await cursor.fetchall()
-            backfilled_count = 0
-            for u_id, v_at, lvl_code in rows:
-                calc_year = None
-                if v_at:
-                    try:
-                        dt = datetime.fromisoformat(v_at.replace(" ", "T"))
-                        calc_year = dt.year
-                    except (ValueError, TypeError):
-                        pass
-                if not calc_year:
-                    calc_year = datetime.now().year
 
-                lvl = (lvl_code or "R").upper()
-                if lvl == "F":
-                    est_date = f"{calc_year + 1:04d}-05-31"
-                elif lvl == "D":
-                    est_date = f"{calc_year + 2:04d}-10-31"
-                elif lvl == "R":
-                    est_date = f"{calc_year + 3:04d}-10-31"
-                elif lvl == "P":
-                    est_date = f"{calc_year + 2:04d}-10-31"
-                else:
-                    est_date = f"{calc_year + 3:04d}-10-31"
+# One-time data backfills, in order. Each is safe to run on every connect.
+_DATA_MIGRATIONS = (
+    _backfill_campus_code,
+    _backfill_programme_code,
+    _backfill_card_expiry,
+)
 
-                await self._conn.execute(
-                    "UPDATE verifications SET card_expiry_date = ? WHERE discord_user_id = ?",
-                    (est_date, u_id),
-                )
-                backfilled_count += 1
 
-            if backfilled_count > 0:
-                logger.info(
-                    f"Backfilled estimated card_expiry_date for {backfilled_count} legacy student verification record(s)."
-                )
-        except Exception as e:
-            logger.debug(f"Legacy card_expiry_date migration notice: {e}")
+async def _apply_data_migrations(conn: aiosqlite.Connection) -> None:
+    for migration in _DATA_MIGRATIONS:
+        await migration(conn)
+
+
+class Database(
+    VerificationRepoMixin,
+    GuildSettingsRepoMixin,
+    GuestRepoMixin,
+    BlacklistRepoMixin,
+    MassActionRepoMixin,
+    UptimeRepoMixin,
+    DeadLetterRepoMixin,
+    SocietyBridgeRepoMixin,
+):
+    """
+    Database interface for TARVeri.
+    Uses SQLite WAL mode for non-blocking concurrent reads during verification writes.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self._conn: aiosqlite.Connection | None = None
+        self._audit_buffer: list[tuple[Any, ...]] = []
+        self._audit_flush_task: asyncio.Task[None] | None = None
+        self.runtime_settings: dict[str, float | int] = default_runtime_values()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._conn is not None
+
+    async def connect(self) -> None:
+        """Establishes connection, verifies schema version, and creates schema and indexes."""
+        if self._conn:
+            return
+
+        self._conn = await aiosqlite.connect(self.path, timeout=60.0)
+        await self._conn.execute("PRAGMA busy_timeout = 60000;")
+        await self._conn.execute("PRAGMA foreign_keys = ON;")
+        # WAL mode lets reads (e.g. admin queries on audit_log) proceed without
+        # blocking on writes (verifications), which matters as guild count grows.
+        await self._conn.execute("PRAGMA journal_mode = WAL;")
+        await self._conn.execute("PRAGMA synchronous = NORMAL;")
+        await self._conn.execute("PRAGMA cache_size = -4000;")  # 4MB in-memory page cache
+        await self._conn.execute("PRAGMA temp_store = MEMORY;")  # Keep temp tables & sorts in RAM
+        await self._conn.execute("PRAGMA mmap_size = 67108864;")  # 64MB memory-mapped I/O
+
+        await self._check_integrity()
+        await self._checkpoint_on_startup()
+
+        await self._conn.executescript(_SCHEMA_TABLES_SQL)
+        await _apply_column_migrations(self._conn)
+        await self._conn.executescript(_SCHEMA_INDEXES_SQL)
+        await _apply_data_migrations(self._conn)
 
         await self.load_runtime_settings()
+        await self._stamp_schema_version()
+        await self._conn.commit()
 
+    async def _check_integrity(self) -> None:
+        """Self-healing: verify database integrity upon connection."""
+        try:
+            cursor = await self._conn.execute("PRAGMA integrity_check;")
+            rows = await cursor.fetchall()
+            if rows == [("ok",)]:
+                logger.debug("Database integrity check passed (ok).")
+            else:
+                logger.error(f"Database integrity check issue detected: {rows}")
+        except Exception as e:
+            logger.warning(f"Could not execute database integrity check: {e}")
+
+    async def _checkpoint_on_startup(self) -> None:
+        """Checkpoints WAL on startup (PASSIVE mode to avoid blocking or requiring exclusive lock)."""
+        try:
+            await self._conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        except Exception as e:
+            logger.debug(f"Initial WAL checkpoint notice: {e}")
+
+    async def _stamp_schema_version(self) -> None:
         cursor = await self._conn.execute("PRAGMA user_version;")
         row = await cursor.fetchone()
         current_version = row[0] if row else 0
 
         if current_version == 0:
             await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION};")
-
-        await self._conn.commit()
 
     async def load_runtime_settings(self) -> None:
         values = default_runtime_values()
