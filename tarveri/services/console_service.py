@@ -402,4 +402,3 @@ class ConsoleService(ConsoleCore):
                     failed += 1
 
         self.write_output(f"[SUCCESS] Broadcast dispatched to {sent} guild(s). ({failed} failed)")
-

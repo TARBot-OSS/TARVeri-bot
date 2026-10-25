@@ -562,5 +562,3 @@ async def test_console_service_session_timeout(mock_bot, mock_service, tmp_path)
     assert "[AUTH REQUIRED]" in captured.getvalue()
 
     await db.close()
-
-

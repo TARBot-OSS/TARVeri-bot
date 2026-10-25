@@ -241,9 +241,7 @@ class RuntimeSettingsModal(ui.Modal, title="🛡️ Join Protection & Audit Tuni
         )
 
         summary = "\n".join(f"• {SETTINGS_BY_KEY[key].label}: `{value:g}`" for key, value in values.items())
-        await interaction.response.send_message(
-            f"✅ Saved and applied immediately:\n{summary}", ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Saved and applied immediately:\n{summary}", ephemeral=True)
 
 
 class ChannelSelectComponent(ui.ChannelSelect):

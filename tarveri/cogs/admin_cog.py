@@ -2488,8 +2488,7 @@ class AdminCog(commands.Cog, name="Admin"):
         await self.db.log(
             "INFO" if revoked else "WARNING",
             "SOCIETY_PAIR_REVOKED" if revoked else "SOCIETY_PAIR_REVOKE_NOOP",
-            f"Pairing for society guild {target_id} "
-            f"{'revoked' if revoked else 'was not active, nothing revoked'}",
+            f"Pairing for society guild {target_id} {'revoked' if revoked else 'was not active, nothing revoked'}",
             guild=interaction.guild,
             user_id=interaction.user.id,
         )

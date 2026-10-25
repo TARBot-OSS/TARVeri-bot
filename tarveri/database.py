@@ -1095,9 +1095,7 @@ class Database(
             cursor = await conn.execute("SELECT 1 FROM console_admins LIMIT 1;")
             return await cursor.fetchone() is not None
 
-    async def add_console_admin(
-        self, username: str, role: str = "admin", added_by: str | None = None
-    ) -> bool:
+    async def add_console_admin(self, username: str, role: str = "admin", added_by: str | None = None) -> bool:
         """Adds a username to the authorized console administrators table."""
         now_ts = now_formatted()
         try:
