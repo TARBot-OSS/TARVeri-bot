@@ -195,6 +195,122 @@ class VerificationService(
 
         return True, None
 
+    async def _blacklist_reply(
+        self,
+        user: discord.User | discord.Member,
+        guild_ctx: discord.Guild | None,
+        id_hash: str,
+        email_hash: str | None,
+    ) -> str | None:
+        """Logs and alerts on a blacklisted verification attempt. Returns the reply to send, or None."""
+        # Check if user, student ID, or email is blacklisted in current guild context
+        if guild_ctx and hasattr(guild_ctx, "id"):
+            match = await self.db.get_blacklist_match(
+                guild_ctx.id,
+                user_id=user.id,
+                student_id_hash=id_hash,
+                email_hash=email_hash,
+            )
+            if match:
+                bl_reason = match.get("reason")
+                target_type = match.get("target_type", "UNKNOWN")
+                display_mask = match.get("display_mask", "N/A")
+                await self.db.log(
+                    "WARNING",
+                    "BLACKLIST_ATTEMPT_BLOCKED",
+                    f"{user} (ID: {user.id}) verification blocked due to guild blacklist in '{guild_ctx.name}'. Type: {target_type}, Mask: {display_mask}, Reason: {bl_reason}",
+                    user_id=user.id,
+                    guild=guild_ctx,
+                )
+
+                # Dispatch real-time security alert embed to private #tarveri-log
+                alert_embed = discord.Embed(
+                    title="🚫 [Security Alert] Blacklisted Verification Blocked",
+                    description=f"A verification attempt was blocked because the target matches an active entry on the **{guild_ctx.name}** blacklist.",
+                    color=discord.Color.red(),
+                    timestamp=datetime.now(get_configured_tz()),
+                )
+                user_mention = getattr(user, "mention", f"<@{user.id}>")
+                alert_embed.add_field(
+                    name="👤 Discord User",
+                    value=f"{user_mention} (`{user}` • ID: `{user.id}`)",
+                    inline=False,
+                )
+                alert_embed.add_field(name="🛡️ Blacklist Vector", value=f"`{target_type}`", inline=True)
+                alert_embed.add_field(name="🔍 Matched Target", value=f"`{display_mask}`", inline=True)
+                alert_embed.add_field(name="📝 Reason", value=bl_reason or "*No reason specified*", inline=False)
+                alert_embed.add_field(
+                    name="⚡ Action Taken",
+                    value="Verification blocked immediately. No roles assigned.",
+                    inline=False,
+                )
+                alert_embed.set_footer(text="TARVeri Security Guard • Guild Blacklist")
+
+                try:
+                    await self.send_admin_security_alert(guild_ctx, alert_embed)
+                except Exception as alert_exc:
+                    logger.warning(f"Failed sending blacklist verification security alert: {alert_exc}")
+
+                reason_suffix = f" Reason: {bl_reason}" if bl_reason else ""
+                return f"⛔ You are blacklisted from verifying in **{guild_ctx.name}**.{reason_suffix}"
+        return None
+
+    async def _rollback_assigned_roles(
+        self,
+        user: discord.User | discord.Member,
+        sync_result: RoleSyncResult,
+        role_name: str,
+        campus_role_name: str | None,
+        level_role_name: str | None,
+    ) -> None:
+        """Removes the roles granted for a verification that could not be recorded."""
+        # Rollback assigned roles
+        target_names = {role_name, campus_role_name, level_role_name}
+        target_names.discard(None)
+        for g_id, _, r_label in sync_result.verified_in:
+            guild_obj = self.bot.get_guild(g_id) if hasattr(self.bot, "get_guild") else None
+            if not guild_obj and hasattr(self.bot, "guilds"):
+                for g in self.bot.guilds:
+                    if getattr(g, "id", None) == g_id:
+                        guild_obj = g
+                        break
+            if guild_obj:
+                member_obj = await self.get_or_fetch_member(guild_obj, user.id)
+                if member_obj:
+                    roles_to_remove = [
+                        r
+                        for r in getattr(member_obj, "roles", [])
+                        if getattr(r, "name", "") in target_names
+                        or (isinstance(getattr(r, "name", None), str) and getattr(r, "name", "") in r_label)
+                    ]
+                    if roles_to_remove:
+                        try:
+                            await member_obj.remove_roles(
+                                *roles_to_remove, reason="TARVeri: Database collision rollback"
+                            )
+                        except Exception as exc:
+                            logger.debug("Failed removing roles during rollback: %s", exc)
+                    else:
+                        try:
+                            await member_obj.remove_roles(reason="TARVeri: Database collision rollback")
+                        except Exception as exc:
+                            logger.debug("Failed removing roles during rollback fallback: %s", exc)
+
+    @staticmethod
+    def _expired_card_notice(iso_expiry_date: str | None) -> str:
+        """Alumni prompt when the student card's study validity has ended. Empty while the card is valid."""
+        today_iso = datetime.now(get_configured_tz()).strftime("%Y-%m-%d")
+        if not (iso_expiry_date and iso_expiry_date < today_iso):
+            return ""
+        expiry_disp = format_card_expiry_display(iso_expiry_date)
+        return (
+            f"\n\n🎓 **Alumni / Academic Status Notice**:\n"
+            f"Based on your student ID (study validity ended **{expiry_disp}**), you may have already graduated!\n"
+            f"• Click **I have Graduated** below or run `/graduate` to claim your official **TARUMT Alumni** role & card badge.\n"
+            f"• If you continued your studies (e.g. Diploma ➔ Degree), click **Further Studies** or run `/verify <new_id>`.\n"
+            f"• If you are still completing your programme, click **Still Studying / Extension**."
+        )
+
     async def perform_verification(
         self,
         user: discord.User | discord.Member,
@@ -293,56 +409,9 @@ class VerificationService(
                     except Exception as e:
                         logger.warning(f"Could not encrypt email for {user}: {e}")
 
-            # Check if user, student ID, or email is blacklisted in current guild context
-            if guild_ctx and hasattr(guild_ctx, "id"):
-                match = await self.db.get_blacklist_match(
-                    guild_ctx.id,
-                    user_id=user.id,
-                    student_id_hash=id_hash,
-                    email_hash=email_hash,
-                )
-                if match:
-                    bl_reason = match.get("reason")
-                    target_type = match.get("target_type", "UNKNOWN")
-                    display_mask = match.get("display_mask", "N/A")
-                    await self.db.log(
-                        "WARNING",
-                        "BLACKLIST_ATTEMPT_BLOCKED",
-                        f"{user} (ID: {user.id}) verification blocked due to guild blacklist in '{guild_ctx.name}'. Type: {target_type}, Mask: {display_mask}, Reason: {bl_reason}",
-                        user_id=user.id,
-                        guild=guild_ctx,
-                    )
-
-                    # Dispatch real-time security alert embed to private #tarveri-log
-                    alert_embed = discord.Embed(
-                        title="🚫 [Security Alert] Blacklisted Verification Blocked",
-                        description=f"A verification attempt was blocked because the target matches an active entry on the **{guild_ctx.name}** blacklist.",
-                        color=discord.Color.red(),
-                        timestamp=datetime.now(get_configured_tz()),
-                    )
-                    user_mention = getattr(user, "mention", f"<@{user.id}>")
-                    alert_embed.add_field(
-                        name="👤 Discord User",
-                        value=f"{user_mention} (`{user}` • ID: `{user.id}`)",
-                        inline=False,
-                    )
-                    alert_embed.add_field(name="🛡️ Blacklist Vector", value=f"`{target_type}`", inline=True)
-                    alert_embed.add_field(name="🔍 Matched Target", value=f"`{display_mask}`", inline=True)
-                    alert_embed.add_field(name="📝 Reason", value=bl_reason or "*No reason specified*", inline=False)
-                    alert_embed.add_field(
-                        name="⚡ Action Taken",
-                        value="Verification blocked immediately. No roles assigned.",
-                        inline=False,
-                    )
-                    alert_embed.set_footer(text="TARVeri Security Guard • Guild Blacklist")
-
-                    try:
-                        await self.send_admin_security_alert(guild_ctx, alert_embed)
-                    except Exception as alert_exc:
-                        logger.warning(f"Failed sending blacklist verification security alert: {alert_exc}")
-
-                    reason_suffix = f" Reason: {bl_reason}" if bl_reason else ""
-                    return f"⛔ You are blacklisted from verifying in **{guild_ctx.name}**.{reason_suffix}"
+            blacklist_reply = await self._blacklist_reply(user, guild_ctx, id_hash, email_hash)
+            if blacklist_reply:
+                return blacklist_reply
 
             # Check if user is already verified
             existing_for_user = await self.db.get_verification_by_user(user.id)
@@ -463,37 +532,7 @@ class VerificationService(
                         )
                 except (sqlite3.IntegrityError, aiosqlite.IntegrityError) as exc:
                     logger.critical("Database collision on record_verification: %s", exc)
-                    # Rollback assigned roles
-                    target_names = {role_name, campus_role_name, level_role_name}
-                    target_names.discard(None)
-                    for g_id, _, r_label in sync_result.verified_in:
-                        guild_obj = self.bot.get_guild(g_id) if hasattr(self.bot, "get_guild") else None
-                        if not guild_obj and hasattr(self.bot, "guilds"):
-                            for g in self.bot.guilds:
-                                if getattr(g, "id", None) == g_id:
-                                    guild_obj = g
-                                    break
-                        if guild_obj:
-                            member_obj = await self.get_or_fetch_member(guild_obj, user.id)
-                            if member_obj:
-                                roles_to_remove = [
-                                    r
-                                    for r in getattr(member_obj, "roles", [])
-                                    if getattr(r, "name", "") in target_names
-                                    or (isinstance(getattr(r, "name", None), str) and getattr(r, "name", "") in r_label)
-                                ]
-                                if roles_to_remove:
-                                    try:
-                                        await member_obj.remove_roles(
-                                            *roles_to_remove, reason="TARVeri: Database collision rollback"
-                                        )
-                                    except Exception as exc:
-                                        logger.debug("Failed removing roles during rollback: %s", exc)
-                                else:
-                                    try:
-                                        await member_obj.remove_roles(reason="TARVeri: Database collision rollback")
-                                    except Exception as exc:
-                                        logger.debug("Failed removing roles during rollback fallback: %s", exc)
+                    await self._rollback_assigned_roles(user, sync_result, role_name, campus_role_name, level_role_name)
                     return "⚠️ Verification failed due to a collision. Please try again or contact an admin."
                 except Exception as exc:
                     logger.critical("Failed to record verification in DB: %s", exc, exc_info=True)
@@ -501,16 +540,7 @@ class VerificationService(
 
                 summary = self.format_role_summary(sync_result) or f"✅ You've been verified as **{role_name}**!"
 
-                today_iso = datetime.now(get_configured_tz()).strftime("%Y-%m-%d")
-                if iso_expiry_date and iso_expiry_date < today_iso:
-                    expiry_disp = format_card_expiry_display(iso_expiry_date)
-                    summary += (
-                        f"\n\n🎓 **Alumni / Academic Status Notice**:\n"
-                        f"Based on your student ID (study validity ended **{expiry_disp}**), you may have already graduated!\n"
-                        f"• Click **I have Graduated** below or run `/graduate` to claim your official **TARUMT Alumni** role & card badge.\n"
-                        f"• If you continued your studies (e.g. Diploma ➔ Degree), click **Further Studies** or run `/verify <new_id>`.\n"
-                        f"• If you are still completing your programme, click **Still Studying / Extension**."
-                    )
+                summary += self._expired_card_notice(iso_expiry_date)
 
                 return summary
             elif sync_result.requires_email_in:

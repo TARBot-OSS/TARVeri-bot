@@ -57,6 +57,29 @@ class ReconciliationMixin(BaseVerificationMixin):
             guild_email_enforced = getattr(self.settings, "enable_email_role_enforcement", False)
         return can_manage, bot_pos, guild_email_required, guild_email_enforced
 
+    async def _strip_blacklisted_member(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        discord_user_id: int,
+        bl_reason: str | None,
+    ) -> int:
+        """Strips a blacklisted member's verified roles and logs it. Returns how many roles were removed."""
+        stripped_roles = await self.strip_all_roles_in_guild(
+            guild,
+            member,
+            reason=f"TARVeri Self-Healing: Stripped verified roles from blacklisted member ({bl_reason})",
+        )
+        if stripped_roles:
+            await self.db.log(
+                "WARNING",
+                "BLACKLIST_ROLE_STRIPPED",
+                f"Self-healing: Stripped {len(stripped_roles)} role(s) from blacklisted member {member} (ID: {discord_user_id}) in '{guild.name}'. Reason: {bl_reason}",
+                guild=guild,
+                user_id=discord_user_id,
+            )
+        return len(stripped_roles or [])
+
     async def reconcile_verified_members(
         self,
         guild: discord.Guild,
@@ -120,20 +143,9 @@ class ReconciliationMixin(BaseVerificationMixin):
                 email_hash=details.get("student_email_hash") if details else None,
             )
             if is_bl:
-                stripped_roles = await self.strip_all_roles_in_guild(
-                    guild,
-                    member,
-                    reason=f"TARVeri Self-Healing: Stripped verified roles from blacklisted member ({bl_reason})",
+                summary["unauthorized_cleaned"] += await self._strip_blacklisted_member(
+                    guild, member, discord_user_id, bl_reason
                 )
-                if stripped_roles:
-                    summary["unauthorized_cleaned"] += len(stripped_roles)
-                    await self.db.log(
-                        "WARNING",
-                        "BLACKLIST_ROLE_STRIPPED",
-                        f"Self-healing: Stripped {len(stripped_roles)} role(s) from blacklisted member {member} (ID: {discord_user_id}) in '{guild.name}'. Reason: {bl_reason}",
-                        guild=guild,
-                        user_id=discord_user_id,
-                    )
                 continue
 
             if guild_email_required and not is_email_verified and guild_email_enforced:
