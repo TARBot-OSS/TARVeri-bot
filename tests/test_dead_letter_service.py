@@ -261,3 +261,38 @@ async def test_email_service_enqueues_to_dlq_on_send_failure(tmp_path):
         assert kwargs["email"] == "test@student.tarc.edu.my"
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_dlq_redelivery_keeps_existing_guess_counter():
+    settings = Settings(bot_token="t", id_hash_secret="s", email_otp_max_attempts=3)
+    email_svc = EmailService(settings, mock_smtp=True)
+    dlq_svc = DeadLetterQueueService(bot=MagicMock(), db=MagicMock(), settings=settings, email_service=email_svc)
+    payload = {
+        "user_id": 77,
+        "student_id": "24WMR99999",
+        "email": "s@student.tarc.edu.my",
+        "otp_code": "123456",
+        "expires_at": time.time() + 300,
+    }
+
+    # Nothing pending: redelivery restores the code with the remaining TTL, not a fresh minimum.
+    ok, _ = await dlq_svc._process_email_item({}, payload)
+    assert ok is True
+    restored = email_svc._pending_otps[77]
+    assert restored.expires_at - time.monotonic() <= 300
+
+    # A pending record with the same code keeps its spent guesses.
+    restored.attempts_left = 1
+    await dlq_svc._process_email_item({}, payload)
+    assert email_svc._pending_otps[77].attempts_left == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_smtp_credentials_fail_instead_of_faking_success():
+    settings = Settings(bot_token="t", id_hash_secret="s", smtp_user="", smtp_password="")
+    svc = EmailService(settings, mock_smtp=False)
+    res = await svc.generate_and_send_otp(5, "24WMR99999", "s@student.tarc.edu.my", server_name="S")
+    assert res["success"] is False
+    assert svc.sent_emails == []
+    assert svc.get_pending_otp(5) is None
