@@ -106,6 +106,56 @@ async def test_email_service_otp_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_otp_send_cap_per_user_and_per_email():
+    settings = Settings(
+        bot_token="fake_token",
+        id_hash_secret="fake_secret",
+        enable_email_verification=True,
+        email_encryption_key=Fernet.generate_key().decode(),
+        email_otp_resend_cooldown_seconds=60,
+        rate_limit_max_attempts=2,
+    )
+    svc = EmailService(settings, mock_smtp=True)
+
+    # Switching address skips the resend cooldown, but the per-user cap still applies.
+    for i in range(2):
+        res = await svc.generate_and_send_otp(1, "24WMD01234", f"a{i}@student.tarc.edu.my", server_name="S")
+        assert res["success"] is True
+    capped = await svc.generate_and_send_otp(1, "24WMD01234", "a9@student.tarc.edu.my", server_name="S")
+    assert capped["success"] is False
+    assert "Too many verification codes" in capped["error"]
+    assert len(svc.sent_emails) == 2
+
+    # Many accounts cannot flood one address either.
+    target = "victim@student.tarc.edu.my"
+    for uid in (10, 11):
+        assert (await svc.generate_and_send_otp(uid, "24WMD01234", target, server_name="S"))["success"] is True
+    flood = await svc.generate_and_send_otp(12, "24WMD01234", target, server_name="S")
+    assert flood["success"] is False
+
+
+def test_otp_email_escapes_server_name():
+    svc = EmailService(Settings(bot_token="t", id_hash_secret="s"), mock_smtp=True)
+    rendered = svc._render_html_template("123456", '<a href="https://evil.example">Login</a>', 10)
+    assert "<a href=" not in rendered
+    assert "&lt;a href=" in rendered
+
+
+@pytest.mark.asyncio
+async def test_bounce_info_is_isolated_per_task():
+    import asyncio
+
+    svc = EmailService(Settings(bot_token="t", id_hash_secret="s"), mock_smtp=True)
+
+    async def send(reason):
+        svc._last_bounce_info = reason
+        await asyncio.sleep(0)
+        return svc._last_bounce_info
+
+    assert await asyncio.gather(send("bounce-A"), send("bounce-B")) == ["bounce-A", "bounce-B"]
+
+
+@pytest.mark.asyncio
 async def test_email_service_otp_max_attempts():
     key = Fernet.generate_key().decode()
     settings = Settings(
