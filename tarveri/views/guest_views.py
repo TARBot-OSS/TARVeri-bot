@@ -99,16 +99,31 @@ def get_admin_role_mention(guild: discord.Guild, admin_role_name: str = "TARVeri
     return "@Staff"
 
 
+def _role_grants_admin(role: Any) -> bool:
+    """True when a role carries Administrator or Manage Server.
+
+    Discord stops a member from giving a role permissions they lack, so a moderator
+    with only Manage Roles cannot forge a role that passes this check.
+    """
+    perms = getattr(role, "permissions", None)
+    return bool(perms and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)))
+
+
 def is_admin_or_has_role(interaction: discord.Interaction, admin_role_name: str) -> bool:
-    """Checks if the user has Administrator permission, the configured admin role, or standard admin roles."""
+    """Checks for Administrator permission, or a held admin role that also grants Administrator or Manage Server.
+
+    Role names alone are not trusted: anyone with Manage Roles can create a role named "TARVeri Admin".
+    """
     if not interaction.guild or not isinstance(interaction.user, discord.Member):
         return False
     if interaction.user.guild_permissions.administrator:
         return True
+    user_roles = getattr(interaction.user, "roles", None) or []
     admin_role = get_admin_role_or_fallback(interaction.guild, admin_role_name)
-    if admin_role and admin_role in interaction.user.roles:
+    if admin_role and admin_role in user_roles and _role_grants_admin(admin_role):
         return True
-    return any(r.name.lower() == admin_role_name.lower() for r in interaction.user.roles)
+    wanted = (admin_role_name or "").lower()
+    return any(getattr(r, "name", "").lower() == wanted and _role_grants_admin(r) for r in user_roles)
 
 
 class StudentVerificationModal(discord.ui.Modal, title="🎓 TARUMT Student Verification"):
