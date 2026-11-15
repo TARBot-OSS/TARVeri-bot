@@ -60,7 +60,7 @@ TARClub confirms the link. From then on, committee appointments require the memb
 
 ## How a member counts as verified
 
-TARClub treats a member as a verified student if they hold one of TARVeri's role names: `TARUMT Verified`, a faculty role (`FAFB`, `CPUS`, `FOCS`, `FCCI`, `FOAS`, `FOBE`, `FSSH`, `FOET`), or a study-level role (`Bachelor's Degree`, `Diploma`, `Foundation`, `Postgraduate`). Roles with similar names, such as `Student Council`, do not count. If the member has none of these roles and both bots run on the same machine, TARClub reads TARVeri's database read-only. Set `TARCLUB_TARVERI_DB_PATH` to its location.
+TARClub treats a member as a verified student if they hold one of TARVeri's role names: `TARUMT Verified`, a faculty role (`FAFB`, `CPUS`, `FOCS`, `FCCI`, `FOAS`, `FOBE`, `FSSH`, `FOET`), or a study-level role (`Degree`, `Diploma`, `Foundation`, `Postgraduate`). Servers that still have the older `Bachelor's Degree` role also count. Roles with similar names, such as `Student Council`, do not count. If the member has none of these roles and both bots run on the same machine, TARClub reads TARVeri's database read-only. Set `TARCLUB_TARVERI_DB_PATH` to its location.
 
 ## Troubleshooting
 
