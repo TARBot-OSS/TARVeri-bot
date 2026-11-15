@@ -38,9 +38,25 @@ def test_is_admin_or_has_role():
     member_role.guild_permissions.administrator = False
     role = MagicMock(spec=discord.Role)
     role.name = "TARVeri Admin"
+    role.permissions = discord.Permissions(manage_guild=True)
     member_role.roles = [role]
     interaction.user = member_role
+    interaction.guild.roles = [role]
     assert is_admin_or_has_role(interaction, admin_role_name) is True
+
+    # A role that only has the admin name (no Administrator / Manage Server) is not trusted.
+    # Anyone with Manage Roles can create such a role and assign it to themselves.
+    for spoof_name in ("TARVeri Admin", "Admin", "Administrator"):
+        spoof = MagicMock(spec=discord.Role)
+        spoof.name = spoof_name
+        spoof.permissions = discord.Permissions(manage_roles=True)
+        member_spoof = MagicMock(spec=discord.Member)
+        member_spoof.guild_permissions.administrator = False
+        member_spoof.roles = [spoof]
+        interaction.user = member_spoof
+        interaction.guild.roles = [spoof]
+        assert is_admin_or_has_role(interaction, admin_role_name) is False
+    interaction.guild.roles = []
 
     # Regular member without admin permission or role
     member_regular = MagicMock(spec=discord.Member)

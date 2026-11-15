@@ -29,19 +29,10 @@ logger = logging.getLogger("tarveri")
 
 
 def is_admin_or_has_role(interaction: discord.Interaction, admin_role_name: str) -> bool:
-    """Checks if invoking user has Administrator permission, the configured Admin role, or a standard admin/staff role."""
-    if not interaction.guild or not isinstance(interaction.user, discord.Member):
-        return False
-    if interaction.user.guild_permissions.administrator:
-        return True
-    from tarveri.cogs.guest_cog import get_admin_role_or_fallback
+    """Checks for Administrator permission, or a held admin role that also grants Administrator or Manage Server."""
+    from tarveri.views.guest_views import is_admin_or_has_role as _check
 
-    admin_role = get_admin_role_or_fallback(interaction.guild, admin_role_name)
-    if admin_role and admin_role in interaction.user.roles:
-        return True
-    return any(
-        getattr(r, "name", "").lower() == admin_role_name.lower() for r in getattr(interaction.user, "roles", [])
-    )
+    return _check(interaction, admin_role_name)
 
 
 class AdminCog(

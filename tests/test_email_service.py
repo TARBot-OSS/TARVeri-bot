@@ -473,6 +473,9 @@ async def test_email_service_primary_fails_without_fallback():
 
 @pytest.mark.asyncio
 async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
+    # Current-year intake: a fixed 2024 Diploma ID now counts as graduated and takes the alumni path.
+    STUDENT_ID = f"{datetime.now().year % 100:02d}WMD05555"
+    STUDENT_EMAIL = f"{STUDENT_ID.lower()}@student.tarc.edu.my"
     key = Fernet.generate_key().decode()
     settings = Settings(
         bot_token="fake_token",
@@ -504,23 +507,21 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     # Case 1: Guild is OPTED-OUT (default) -> email is optional, omitting email succeeds directly
     modal_opt_out = VerificationModal(service, email_service, require_email=False)
     assert modal_opt_out.student_email.required is False
-    modal_opt_out.student_id._value = "24WMD05555"
+    modal_opt_out.student_id._value = STUDENT_ID
     modal_opt_out.student_email._value = ""
 
     with patch.object(service, "perform_verification", return_value="✅ Verified!") as mock_verify:
         await modal_opt_out.on_submit(interaction)
         interaction.followup.send.assert_called_once_with("✅ Verified!", ephemeral=True)
-        mock_verify.assert_called_once_with(interaction.user, "24WMD05555", raw_expiry_date=None)
+        mock_verify.assert_called_once_with(interaction.user, STUDENT_ID, raw_expiry_date=None)
 
     # Case 1b: Guild is OPTED-OUT, user provides email -> verifies directly without OTP, storing email encrypted
-    modal_opt_out.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_opt_out.student_email._value = STUDENT_EMAIL
     interaction.followup.send.reset_mock()
     with patch.object(service, "perform_verification", return_value="✅ Verified with stored email!") as mock_verify:
         await modal_opt_out.on_submit(interaction)
         interaction.followup.send.assert_called_once_with("✅ Verified with stored email!", ephemeral=True)
-        mock_verify.assert_called_once_with(
-            interaction.user, "24WMD05555", raw_expiry_date=None, raw_email="24wmd05555@student.tarc.edu.my"
-        )
+        mock_verify.assert_called_once_with(interaction.user, STUDENT_ID, raw_expiry_date=None, raw_email=STUDENT_EMAIL)
         assert email_service.get_pending_otp(interaction.user.id) is None  # No OTP generated/sent
 
     # Case 2: Guild OPTS-IN -> require_email = True, omitting email is blocked
@@ -529,7 +530,7 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
 
     modal_opt_in = VerificationModal(service, email_service, require_email=True)
     assert modal_opt_in.student_email.required is True
-    modal_opt_in.student_id._value = "24WMD05555"
+    modal_opt_in.student_id._value = STUDENT_ID
     modal_opt_in.student_email._value = ""
 
     interaction.followup.send.reset_mock()
@@ -538,7 +539,7 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     assert "Institutional student email is required" in interaction.followup.send.call_args[0][0]
 
     # Case 3: Guild is OPTED-IN and valid email is provided -> OTP dispatched
-    modal_opt_in.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_opt_in.student_email._value = STUDENT_EMAIL
     interaction.followup.send.reset_mock()
     await modal_opt_in.on_submit(interaction)
     interaction.followup.send.assert_called_once()
@@ -561,8 +562,8 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     )
     email_service_unrestricted = EmailService(settings_unrestricted, mock_smtp=True)
     modal_unrestricted = VerificationModal(service, email_service_unrestricted, require_email=False)
-    modal_unrestricted.student_id._value = "24WMD05555"
-    modal_unrestricted.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_unrestricted.student_id._value = STUDENT_ID
+    modal_unrestricted.student_email._value = STUDENT_EMAIL
 
     interaction.followup.send.reset_mock()
     await modal_unrestricted.on_submit(interaction)
