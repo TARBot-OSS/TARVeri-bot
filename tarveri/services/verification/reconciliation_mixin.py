@@ -117,6 +117,25 @@ class ReconciliationMixin(BaseVerificationMixin):
 
         can_manage, bot_pos, guild_email_required, guild_email_enforced = await self._reconciliation_context(guild)
 
+        # A role's classification does not depend on the member, so match each role once per run
+        # instead of once per member (the fuzzy matchers run several regex tiers per name).
+        student_role_cache: dict[Any, bool] = {}
+
+        def is_student_role(r: Any) -> bool:
+            key = getattr(r, "id", None)
+            if not isinstance(key, int):
+                key = id(r)
+            cached = student_role_cache.get(key)
+            if cached is None:
+                cached = (
+                    any(self._match_faculty_role_in_list([r], fac) is not None for fac in FACULTY_ROLE_NAMES)
+                    or any(self._match_campus_role_in_list([r], camp) is not None for camp in CAMPUS_ROLE_NAMES)
+                    or any(self._match_study_level_role_in_list([r], lvl) is not None for lvl in STUDY_LEVEL_ROLE_NAMES)
+                    or self._match_alumni_role_in_list([r]) is not None
+                )
+                student_role_cache[key] = cached
+            return cached
+
         verified_user_ids: set[int] = set()
         email_strip_candidates: list[tuple[discord.Member, list[discord.Role]]] = []
 
@@ -150,14 +169,7 @@ class ReconciliationMixin(BaseVerificationMixin):
 
             if guild_email_required and not is_email_verified and guild_email_enforced:
                 # When retroactive enforcement is explicitly enabled by admin, collect candidates for revocation
-                roles_to_strip = [
-                    r
-                    for r in member_roles
-                    if any(self._match_faculty_role_in_list([r], fac) is not None for fac in FACULTY_ROLE_NAMES)
-                    or any(self._match_campus_role_in_list([r], camp) is not None for camp in CAMPUS_ROLE_NAMES)
-                    or any(self._match_study_level_role_in_list([r], lvl) is not None for lvl in STUDY_LEVEL_ROLE_NAMES)
-                    or self._match_alumni_role_in_list([r]) is not None
-                ]
+                roles_to_strip = [r for r in member_roles if is_student_role(r)]
                 strip_manageable = [
                     r
                     for r in roles_to_strip
@@ -368,16 +380,7 @@ class ReconciliationMixin(BaseVerificationMixin):
         if isinstance(guild_members, (list, tuple)):
             for member in guild_members:
                 if member.id not in verified_user_ids and not getattr(member, "bot", False):
-                    stray_roles = [
-                        r
-                        for r in getattr(member, "roles", [])
-                        if any(self._match_faculty_role_in_list([r], fac) is not None for fac in FACULTY_ROLE_NAMES)
-                        or any(self._match_campus_role_in_list([r], camp) is not None for camp in CAMPUS_ROLE_NAMES)
-                        or any(
-                            self._match_study_level_role_in_list([r], lvl) is not None for lvl in STUDY_LEVEL_ROLE_NAMES
-                        )
-                        or self._match_alumni_role_in_list([r]) is not None
-                    ]
+                    stray_roles = [r for r in getattr(member, "roles", []) if is_student_role(r)]
                     stray_manageable = [
                         r
                         for r in stray_roles
