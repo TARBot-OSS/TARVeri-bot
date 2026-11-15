@@ -404,9 +404,9 @@ class EmailService:
         ttl_minutes: int,
     ) -> bool:
         """Transmits verification email via async SMTP or mock collector."""
-        if self.mock_smtp or not self.settings.smtp_user or not self.settings.smtp_password:
-            # Mock / Developer Mode: Log code without real SMTP transmission
-            logger.info(f"[MOCK_SMTP] Sent verification email to {to_email} with OTP: {otp_code} for {server_name}")
+        if self.mock_smtp:
+            # Explicit mock mode (tests): record the email instead of sending it. Never log the OTP.
+            logger.info(f"[MOCK_SMTP] Recorded verification email to {to_email} for {server_name}")
             self.sent_emails.append(
                 {
                     "to": to_email,
@@ -416,6 +416,15 @@ class EmailService:
                 }
             )
             return True
+
+        if not self.settings.smtp_user or not self.settings.smtp_password:
+            # Missing credentials used to fall back to mock mode, which reported success and logged
+            # the OTP. Fail instead so the user sees an error and staff see the misconfiguration.
+            logger.error(
+                "Cannot send verification email to %s: TARVERI_SMTP_USER / TARVERI_SMTP_PASSWORD are not set",
+                to_email,
+            )
+            return False
 
         return await self._send_smtp_async(
             to_email=to_email,
