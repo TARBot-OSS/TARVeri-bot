@@ -446,6 +446,13 @@ class VerificationRepoMixin(BaseRepoMixin):
         )
         return await cursor.fetchall()
 
+    async def get_verified_user_ids(self) -> set[int]:
+        """Returns the Discord IDs of every user with a verification record."""
+        if not self._conn:
+            raise RuntimeError("Database connection is not open.")
+        cursor = await self._conn.execute("SELECT discord_user_id FROM verifications")
+        return {int(r[0]) for r in await cursor.fetchall()}
+
     async def get_email_verified_students(self) -> list[tuple[int, str, str | None, str | None, bool, str]]:
         """Returns (discord_user_id, faculty_code, campus_code, level_code, is_alumni, student_email_encrypted)
         for every record with an institutional email on file."""

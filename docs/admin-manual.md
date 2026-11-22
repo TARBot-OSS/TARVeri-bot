@@ -36,6 +36,12 @@ Administrators can inspect comprehensive verification and membership metadata fo
 - Fuzzy-matches the name part of each student's institutional email (`tanweiming-wm24@...` → `tanweiming`). Typos, partial names and any word order work: `weiming tan`, `tan wei mng`.
 - Only email-verified students who are members of the current server are searched. Pick a result to open the full lookup record. Each search is written to the audit log.
 
+### List Unverified Members (Dashboard):
+- `/admin dashboard` → **Member Moderation** → **🚫 List Unverified Members**.
+- Lists this server's human members with no student verification, longest-waiting first, with guest and no-role counts.
+- The full list comes as a CSV (`discord_user_id, username, display_name, joined_at, days_in_server, account_created, is_guest, roles`). If it is bigger than the server's upload limit (10 MB by default, more with boosts) it is zipped.
+- Each export is logged as `ADMIN_UNVERIFIED_EXPORT`.
+
 ### Slash Command:
 - **`/admin user_info user:@Member`** (or by Discord user snowflake ID):
   - **Verification Status**: Displays Tier 1 (Fast Verified without email) or Tier 2 (Email-Attested OTP).
