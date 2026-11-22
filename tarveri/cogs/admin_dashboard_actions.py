@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import io
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import discord
@@ -17,12 +19,19 @@ from tarveri.cogs.admin_dashboard_modals import (
     AlumniRevokeModal,
     GuestRoleModal,
     RuntimeSettingsModal,
+    StudentNameSearchModal,
     UnverifyModal,
     UserLookupModal,
 )
 from tarveri.services.log_service import (
     archive_old_logs,
     list_daily_logs,
+)
+from tarveri.services.unverified_export import (
+    DEFAULT_UPLOAD_LIMIT,
+    build_unverified_csv,
+    collect_unverified_members,
+    package_export,
 )
 from tarveri.utils import schedule_ttl_delete
 
@@ -163,6 +172,74 @@ class DashboardActionsMixin:
         modal = UserLookupModal(self.cog, self)
         await interaction.response.send_modal(modal)
 
+    async def _on_name_search_clicked(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(StudentNameSearchModal(self.cog, self))
+
+    async def _on_unverified_export_clicked(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("❌ This list only works inside a server.", ephemeral=True)
+            return
+        if not guild.chunked:
+            await guild.chunk()
+
+        verified_ids = await self.cog.db.get_verified_user_ids()
+        settings = await self.cog.db.get_guild_settings(guild.id)
+        guest_role = None
+        guest_service = getattr(self.cog.bot, "guest_service", None)
+        if guest_service:
+            guest_role = await guest_service.find_guest_role(guild, settings[2] if settings else None)
+        rows = collect_unverified_members(guild.members, verified_ids, guest_role.id if guest_role else None)
+
+        await self.cog.db.log(
+            "INFO",
+            "ADMIN_UNVERIFIED_EXPORT",
+            f"Admin {interaction.user} exported {len(rows)} unverified member(s)",
+            guild=guild,
+            user_id=interaction.user.id,
+        )
+
+        guests = sum(1 for u in rows if u.is_guest)
+        no_roles = sum(1 for u in rows if not u.roles)
+        humans = sum(1 for m in guild.members if not m.bot)
+        embed = discord.Embed(
+            title="🚫 Unverified Members",
+            description=(
+                f"**{len(rows)}** of **{humans}** human member(s) have no student verification.\n"
+                f"• 🎫 Guests: **{guests}**\n"
+                f"• 🫥 No roles at all: **{no_roles}**"
+            ),
+            color=discord.Color.orange(),
+        )
+        if not rows:
+            embed.description = f"✅ All **{humans}** human member(s) are verified."
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        now = datetime.now(UTC)
+        preview = []
+        for u in rows[:15]:
+            days = u.days_in_server(now)
+            waited = f"{days}d in server" if days is not None else "join date unknown"
+            tag = " · 🎫 Guest" if u.is_guest else ""
+            preview.append(f"<@{u.discord_user_id}> (`{u.discord_user_id}`) · {waited}{tag}")
+        more = f"\n…and {len(rows) - 15} more in the file." if len(rows) > 15 else ""
+        embed.add_field(name="Longest waiting", value="\n".join(preview) + more, inline=False)
+
+        base_name = f"unverified_{guild.id}_{now:%Y%m%d_%H%M}"
+        limit = getattr(guild, "filesize_limit", None) or DEFAULT_UPLOAD_LIMIT
+        packed = package_export(build_unverified_csv(rows, now), base_name, limit)
+        if packed is None:
+            embed.set_footer(text="The full list is too large to upload, even zipped.")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        data, filename = packed
+        embed.set_footer(text=f"Full list attached as {filename}. Opens in Excel or Google Sheets.")
+        await interaction.followup.send(
+            embed=embed, file=discord.File(io.BytesIO(data), filename=filename), ephemeral=True
+        )
+
     async def _on_unverify_clicked(self, interaction: discord.Interaction) -> None:
         modal = UnverifyModal(self.cog, self)
         await interaction.response.send_modal(modal)
@@ -253,6 +330,7 @@ class DashboardActionsMixin:
         await self.cog.db.set_guild_review_channel(interaction.guild.id, None)
         await self.cog.db.set_guild_guest_role(interaction.guild.id, "Guest")
         await self.cog.db.set_guild_admin_role(interaction.guild.id, None)
+        await self.cog.db.set_guild_admin_role_id(interaction.guild.id, 0)
         await self.cog.db.set_guild_email_verification(interaction.guild.id, False)
         await self.cog.db.set_guild_email_enforcement(interaction.guild.id, False)
 

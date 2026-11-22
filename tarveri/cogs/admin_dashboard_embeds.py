@@ -240,6 +240,16 @@ class DashboardEmbedsMixin:
             inline=False,
         )
         embed.add_field(
+            name="🔎 Find Student by Name",
+            value="Fuzzy search of this server's email-verified students by the name in their institutional email. Handles typos, partial names and any word order.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🚫 List Unverified Members",
+            value="Shows this server's members with no student verification (guests included) and attaches the full list as a CSV.",
+            inline=False,
+        )
+        embed.add_field(
             name="❌ Unverify Student",
             value="Unlinks student ID hash, resets rate limiting, and revokes faculty roles across mutual servers.",
             inline=False,

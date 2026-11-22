@@ -5,7 +5,9 @@ Asynchronous email service for student verification via SMTP OTP and AES-256 aut
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import email.utils
+import html
 import logging
 import re
 import secrets
@@ -27,7 +29,15 @@ from tarveri.config import (
     is_valid_student_email,
     mask_email,
 )
+from tarveri.rate_limiter import RateLimiter
 from tarveri.utils import AsyncCircuitBreaker
+
+# Bounce reason of the send running in the current task. A ContextVar keeps concurrent
+# sends from reading each other's bounce reason (a shared attribute raced between users).
+_bounce_info_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("tarveri_last_bounce_info", default=None)
+
+# Window for the per-user and per-email OTP send cap.
+OTP_SEND_WINDOW_SECONDS = 3600
 
 logger = logging.getLogger("tarveri")
 
@@ -131,7 +141,11 @@ class EmailService:
         self.dlq_service = dlq_service
         self._pending_otps: dict[int, PendingOtp] = {}
         self._lock = asyncio.Lock()
-        self._last_bounce_info: str | None = None
+        # Caps OTP emails per Discord user and per address. Every new code resets the guess
+        # counter, so without this cap the guess budget and the mail volume are unbounded.
+        send_cap = max(1, int(getattr(settings, "rate_limit_max_attempts", 5)))
+        self._user_send_limiter = RateLimiter(max_attempts=send_cap, window_seconds=OTP_SEND_WINDOW_SECONDS)
+        self._email_send_limiter = RateLimiter(max_attempts=send_cap, window_seconds=OTP_SEND_WINDOW_SECONDS)
         # Test helper hook for inspecting sent emails during test runs
         self.sent_emails: list[dict[str, Any]] = []
         self._primary_breaker = AsyncCircuitBreaker(
@@ -139,6 +153,14 @@ class EmailService:
             reset_timeout=float(getattr(settings, "circuit_breaker_reset_timeout", 300)),
             name="PrimarySMTPBreaker",
         )
+
+    @property
+    def _last_bounce_info(self) -> str | None:
+        return _bounce_info_var.get()
+
+    @_last_bounce_info.setter
+    def _last_bounce_info(self, value: str | None) -> None:
+        _bounce_info_var.set(value)
 
     @property
     def is_enabled(self) -> bool:
@@ -219,6 +241,17 @@ class EmailService:
                             "error": f"Please wait {int(cooldown_remaining)} seconds before requesting a new verification code.",
                             "ttl_seconds": int(existing.expires_at - now),
                         }
+
+            if self._user_send_limiter.is_rate_limited(user_id) or self._email_send_limiter.is_rate_limited(
+                email_clean
+            ):
+                return {
+                    "success": False,
+                    "error": "⏳ Too many verification codes requested. Please wait an hour and try again, or contact server staff.",
+                    "ttl_seconds": 0,
+                }
+            self._user_send_limiter.record_attempt(user_id)
+            self._email_send_limiter.record_attempt(email_clean)
 
             # Generate secure 6-digit OTP code
             otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
@@ -371,9 +404,9 @@ class EmailService:
         ttl_minutes: int,
     ) -> bool:
         """Transmits verification email via async SMTP or mock collector."""
-        if self.mock_smtp or not self.settings.smtp_user or not self.settings.smtp_password:
-            # Mock / Developer Mode: Log code without real SMTP transmission
-            logger.info(f"[MOCK_SMTP] Sent verification email to {to_email} with OTP: {otp_code} for {server_name}")
+        if self.mock_smtp:
+            # Explicit mock mode (tests): record the email instead of sending it. Never log the OTP.
+            logger.info(f"[MOCK_SMTP] Recorded verification email to {to_email} for {server_name}")
             self.sent_emails.append(
                 {
                     "to": to_email,
@@ -383,6 +416,15 @@ class EmailService:
                 }
             )
             return True
+
+        if not self.settings.smtp_user or not self.settings.smtp_password:
+            # Missing credentials used to fall back to mock mode, which reported success and logged
+            # the OTP. Fail instead so the user sees an error and staff see the misconfiguration.
+            logger.error(
+                "Cannot send verification email to %s: TARVERI_SMTP_USER / TARVERI_SMTP_PASSWORD are not set",
+                to_email,
+            )
+            return False
 
         return await self._send_smtp_async(
             to_email=to_email,
@@ -394,7 +436,7 @@ class EmailService:
     def _render_html_template(self, otp_code: str, server_name: str, ttl_minutes: int) -> str:
         """Renders ultra-clean, minimalist TARUMT verification email."""
         return EMAIL_OTP_HTML_TEMPLATE.format(
-            server_name=server_name,
+            server_name=html.escape(server_name or ""),
             otp_code=otp_code,
             ttl_minutes=ttl_minutes,
         )

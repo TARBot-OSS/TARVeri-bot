@@ -133,6 +133,8 @@ class AdminSettingsCommands:
         else:  # admin
             target_name = role.name if role else (role_name.strip() if role_name else None)
             await self.db.set_guild_admin_role(interaction.guild.id, target_name)
+            # Trust the picked role by ID. A bare name or a reset clears it to the permission check.
+            await self.db.set_guild_admin_role_id(interaction.guild.id, role.id if role else 0)
             desc = (
                 f"Admin / Reviewer role set to {role.mention if role else target_name}."
                 if target_name

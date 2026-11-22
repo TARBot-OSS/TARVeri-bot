@@ -85,6 +85,10 @@ class VerificationService(
         member = guild.get_member(user_id)
         if member is not None:
             return member
+        if getattr(guild, "chunked", False) is True:
+            # With the members intent a chunked guild's cache is complete: a miss means not a member.
+            # Skipping the REST call keeps reconciliation from making one API call per stranger.
+            return None
         try:
             return await guild.fetch_member(user_id)
         except (discord.NotFound, discord.HTTPException):
@@ -102,7 +106,7 @@ class VerificationService(
             member = guild.get_member(user_id)
             if member is not None:
                 mutual.append(guild)
-            else:
+            elif getattr(guild, "chunked", False) is not True:
                 missing_in_cache.append(guild)
 
         if missing_in_cache:

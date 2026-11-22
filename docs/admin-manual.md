@@ -31,6 +31,17 @@ Opens the interactive Administrator Control Center featuring:
 
 Administrators can inspect comprehensive verification and membership metadata for any server member:
 
+### Find Student by Name (Dashboard):
+- `/admin dashboard` → **Member Moderation** → **🔎 Find Student by Name**.
+- Fuzzy-matches the name part of each student's institutional email (`tanweiming-wm24@...` → `tanweiming`). Typos, partial names and any word order work: `weiming tan`, `tan wei mng`.
+- Only email-verified students who are members of the current server are searched. Pick a result to open the full lookup record. Each search is written to the audit log.
+
+### List Unverified Members (Dashboard):
+- `/admin dashboard` → **Member Moderation** → **🚫 List Unverified Members**.
+- Lists this server's human members with no student verification, longest-waiting first, with guest and no-role counts.
+- The full list comes as a CSV (`discord_user_id, username, display_name, joined_at, days_in_server, account_created, is_guest, roles`). If it is bigger than the server's upload limit (10 MB by default, more with boosts) it is zipped.
+- Each export is logged as `ADMIN_UNVERIFIED_EXPORT`.
+
 ### Slash Command:
 - **`/admin user_info user:@Member`** (or by Discord user snowflake ID):
   - **Verification Status**: Displays Tier 1 (Fast Verified without email) or Tier 2 (Email-Attested OTP).
@@ -65,6 +76,7 @@ Administrators can inspect comprehensive verification and membership metadata fo
 
 - **`/admin set_channel [type] [channel]`**: Configures `welcome`, `help`, or guest `review` channels.
 - **`/admin set_role [type] [role]`**: Configures `guest` or `admin` reviewer roles.
+  - **Who counts as a bot admin**: members with Administrator, members holding the server's trusted admin role, or members holding a role named like the admin role that also has Manage Server. The trusted role is stored by ID: on its first start after this change the bot records the role it already used in each server, so existing admins keep access. A role created later with the same name is not trusted. Pick a different role with `/admin set_role admin @role`; reset it to fall back to the permission check.
 - **`/admin panel [channel]`**: Posts the streamlined 3-button verification gateway panel.
 - **`/admin email_verification [enabled]`**: Enables or disables mandatory email OTP verification on the current server. When enabled, new members who verified without email in other servers must complete institutional email verification upon joining before roles are granted.
 - **Join Protection & Audit Tuning** (`/admin dashboard` → Config → "Join Protection & Audit Tuning"): Edits the mass-join alert window, threshold and cooldown, plus the audit-log batch size and flush interval. Values are stored in the database and apply to the next join or audit write, with no restart. Each field is validated before anything is saved; if any field is invalid, nothing changes. The join concurrency cap (5 handlers) is set in code and needs a restart to change.

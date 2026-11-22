@@ -99,16 +99,66 @@ def get_admin_role_mention(guild: discord.Guild, admin_role_name: str = "TARVeri
     return "@Staff"
 
 
+def _role_grants_admin(role: Any) -> bool:
+    """True when a role carries Administrator or Manage Server.
+
+    Discord stops a member from giving a role permissions they lack, so a moderator
+    with only Manage Roles cannot forge a role that passes this check.
+    """
+    perms = getattr(role, "permissions", None)
+    return bool(perms and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)))
+
+
+def _trusted_admin_role_id(interaction: discord.Interaction) -> int:
+    """Returns the guild's captured admin role ID from the bot's database cache, or 0."""
+    db = getattr(getattr(interaction, "client", None), "db", None)
+    ids = getattr(db, "admin_role_ids", None)
+    guild_id = getattr(interaction.guild, "id", None)
+    if not isinstance(ids, dict) or not isinstance(guild_id, int):
+        return 0
+    value = ids.get(guild_id, 0)
+    return value if isinstance(value, int) else 0
+
+
+def pick_admin_role_to_capture(
+    guild: discord.Guild, admin_role_name: str
+) -> tuple[discord.Role | None, list[discord.Role]]:
+    """Picks the role the name-based admin check trusted, to record its ID once.
+
+    Returns (role, other roles sharing its name). With duplicates the oldest role wins (lowest ID,
+    created first): a spoofed copy is always newer than the real one.
+    """
+    role = get_admin_role_or_fallback(guild, admin_role_name)
+    if role is None:
+        return None, []
+    wanted = getattr(role, "name", "").lower()
+    same_name = [r for r in guild.roles if getattr(r, "name", "").lower() == wanted]
+    same_name.sort(key=lambda r: getattr(r, "id", 0))
+    oldest = same_name[0] if same_name else role
+    return oldest, [r for r in same_name if r is not oldest]
+
+
 def is_admin_or_has_role(interaction: discord.Interaction, admin_role_name: str) -> bool:
-    """Checks if the user has Administrator permission, the configured admin role, or standard admin roles."""
+    """Checks for Administrator permission, the guild's captured admin role (by ID), or a held
+    admin role that also grants Administrator or Manage Server.
+
+    Role names alone are not trusted: anyone with Manage Roles can create a role named "TARVeri Admin".
+    """
     if not interaction.guild or not isinstance(interaction.user, discord.Member):
         return False
     if interaction.user.guild_permissions.administrator:
         return True
-    admin_role = get_admin_role_or_fallback(interaction.guild, admin_role_name)
-    if admin_role and admin_role in interaction.user.roles:
+    user_roles = getattr(interaction.user, "roles", None) or []
+    # Trusted role captured by ID (startup capture or /admin set_role). A role created later with the
+    # same name has a different ID, so it does not pass.
+    trusted_id = _trusted_admin_role_id(interaction)
+    if trusted_id and any(getattr(r, "id", None) == trusted_id for r in user_roles):
         return True
-    return any(r.name.lower() == admin_role_name.lower() for r in interaction.user.roles)
+    admin_role = get_admin_role_or_fallback(interaction.guild, admin_role_name)
+    if admin_role and admin_role in user_roles and _role_grants_admin(admin_role):
+        return True
+    wanted = (admin_role_name or "").lower()
+    return any(getattr(r, "name", "").lower() == wanted and _role_grants_admin(r) for r in user_roles)
 
 
 class StudentVerificationModal(discord.ui.Modal, title="🎓 TARUMT Student Verification"):

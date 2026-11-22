@@ -106,6 +106,56 @@ async def test_email_service_otp_lifecycle():
 
 
 @pytest.mark.asyncio
+async def test_otp_send_cap_per_user_and_per_email():
+    settings = Settings(
+        bot_token="fake_token",
+        id_hash_secret="fake_secret",
+        enable_email_verification=True,
+        email_encryption_key=Fernet.generate_key().decode(),
+        email_otp_resend_cooldown_seconds=60,
+        rate_limit_max_attempts=2,
+    )
+    svc = EmailService(settings, mock_smtp=True)
+
+    # Switching address skips the resend cooldown, but the per-user cap still applies.
+    for i in range(2):
+        res = await svc.generate_and_send_otp(1, "24WMD01234", f"a{i}@student.tarc.edu.my", server_name="S")
+        assert res["success"] is True
+    capped = await svc.generate_and_send_otp(1, "24WMD01234", "a9@student.tarc.edu.my", server_name="S")
+    assert capped["success"] is False
+    assert "Too many verification codes" in capped["error"]
+    assert len(svc.sent_emails) == 2
+
+    # Many accounts cannot flood one address either.
+    target = "victim@student.tarc.edu.my"
+    for uid in (10, 11):
+        assert (await svc.generate_and_send_otp(uid, "24WMD01234", target, server_name="S"))["success"] is True
+    flood = await svc.generate_and_send_otp(12, "24WMD01234", target, server_name="S")
+    assert flood["success"] is False
+
+
+def test_otp_email_escapes_server_name():
+    svc = EmailService(Settings(bot_token="t", id_hash_secret="s"), mock_smtp=True)
+    rendered = svc._render_html_template("123456", '<a href="https://evil.example">Login</a>', 10)
+    assert "<a href=" not in rendered
+    assert "&lt;a href=" in rendered
+
+
+@pytest.mark.asyncio
+async def test_bounce_info_is_isolated_per_task():
+    import asyncio
+
+    svc = EmailService(Settings(bot_token="t", id_hash_secret="s"), mock_smtp=True)
+
+    async def send(reason):
+        svc._last_bounce_info = reason
+        await asyncio.sleep(0)
+        return svc._last_bounce_info
+
+    assert await asyncio.gather(send("bounce-A"), send("bounce-B")) == ["bounce-A", "bounce-B"]
+
+
+@pytest.mark.asyncio
 async def test_email_service_otp_max_attempts():
     key = Fernet.generate_key().decode()
     settings = Settings(
@@ -473,6 +523,9 @@ async def test_email_service_primary_fails_without_fallback():
 
 @pytest.mark.asyncio
 async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
+    # Current-year intake: a fixed 2024 Diploma ID now counts as graduated and takes the alumni path.
+    STUDENT_ID = f"{datetime.now().year % 100:02d}WMD05555"
+    STUDENT_EMAIL = f"{STUDENT_ID.lower()}@student.tarc.edu.my"
     key = Fernet.generate_key().decode()
     settings = Settings(
         bot_token="fake_token",
@@ -504,23 +557,21 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     # Case 1: Guild is OPTED-OUT (default) -> email is optional, omitting email succeeds directly
     modal_opt_out = VerificationModal(service, email_service, require_email=False)
     assert modal_opt_out.student_email.required is False
-    modal_opt_out.student_id._value = "24WMD05555"
+    modal_opt_out.student_id._value = STUDENT_ID
     modal_opt_out.student_email._value = ""
 
     with patch.object(service, "perform_verification", return_value="✅ Verified!") as mock_verify:
         await modal_opt_out.on_submit(interaction)
         interaction.followup.send.assert_called_once_with("✅ Verified!", ephemeral=True)
-        mock_verify.assert_called_once_with(interaction.user, "24WMD05555", raw_expiry_date=None)
+        mock_verify.assert_called_once_with(interaction.user, STUDENT_ID, raw_expiry_date=None)
 
     # Case 1b: Guild is OPTED-OUT, user provides email -> verifies directly without OTP, storing email encrypted
-    modal_opt_out.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_opt_out.student_email._value = STUDENT_EMAIL
     interaction.followup.send.reset_mock()
     with patch.object(service, "perform_verification", return_value="✅ Verified with stored email!") as mock_verify:
         await modal_opt_out.on_submit(interaction)
         interaction.followup.send.assert_called_once_with("✅ Verified with stored email!", ephemeral=True)
-        mock_verify.assert_called_once_with(
-            interaction.user, "24WMD05555", raw_expiry_date=None, raw_email="24wmd05555@student.tarc.edu.my"
-        )
+        mock_verify.assert_called_once_with(interaction.user, STUDENT_ID, raw_expiry_date=None, raw_email=STUDENT_EMAIL)
         assert email_service.get_pending_otp(interaction.user.id) is None  # No OTP generated/sent
 
     # Case 2: Guild OPTS-IN -> require_email = True, omitting email is blocked
@@ -529,7 +580,7 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
 
     modal_opt_in = VerificationModal(service, email_service, require_email=True)
     assert modal_opt_in.student_email.required is True
-    modal_opt_in.student_id._value = "24WMD05555"
+    modal_opt_in.student_id._value = STUDENT_ID
     modal_opt_in.student_email._value = ""
 
     interaction.followup.send.reset_mock()
@@ -538,7 +589,7 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     assert "Institutional student email is required" in interaction.followup.send.call_args[0][0]
 
     # Case 3: Guild is OPTED-IN and valid email is provided -> OTP dispatched
-    modal_opt_in.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_opt_in.student_email._value = STUDENT_EMAIL
     interaction.followup.send.reset_mock()
     await modal_opt_in.on_submit(interaction)
     interaction.followup.send.assert_called_once()
@@ -561,8 +612,8 @@ async def test_verification_modal_guild_opt_in_and_opt_out(tmp_path):
     )
     email_service_unrestricted = EmailService(settings_unrestricted, mock_smtp=True)
     modal_unrestricted = VerificationModal(service, email_service_unrestricted, require_email=False)
-    modal_unrestricted.student_id._value = "24WMD05555"
-    modal_unrestricted.student_email._value = "24wmd05555@student.tarc.edu.my"
+    modal_unrestricted.student_id._value = STUDENT_ID
+    modal_unrestricted.student_email._value = STUDENT_EMAIL
 
     interaction.followup.send.reset_mock()
     await modal_unrestricted.on_submit(interaction)

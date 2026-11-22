@@ -1874,3 +1874,27 @@ async def test_mass_revocation_execution_and_rejection(tmp_path):
     assert action_2["decided_by_id"] == 8888
 
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_member_lookup_skips_rest_call_for_chunked_guilds():
+    bot = MagicMock()
+    service = VerificationService(bot, MagicMock(), "secret", RateLimiter())
+
+    chunked = MagicMock(spec=discord.Guild)
+    chunked.chunked = True
+    chunked.get_member.return_value = None
+    chunked.fetch_member = AsyncMock()
+
+    unchunked = MagicMock(spec=discord.Guild)
+    unchunked.chunked = False
+    unchunked.get_member.return_value = None
+    unchunked.fetch_member = AsyncMock(return_value=MagicMock(spec=discord.Member))
+
+    assert await service.get_or_fetch_member(chunked, 42) is None
+    chunked.fetch_member.assert_not_awaited()
+    assert await service.get_or_fetch_member(unchunked, 42) is not None
+
+    bot.guilds = [chunked, unchunked]
+    assert await service.get_mutual_guilds_for_user(42) == [unchunked]
+    chunked.fetch_member.assert_not_awaited()

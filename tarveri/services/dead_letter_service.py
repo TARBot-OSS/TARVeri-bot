@@ -385,9 +385,11 @@ class DeadLetterQueueService:
 
                 async with self.email_service._lock:
                     existing = self.email_service._pending_otps.get(user_id)
-                    if not existing or existing.otp_code == otp_code:
+                    rem_ttl = expires_at - time.time()
+                    # Restore only when nothing is pending. Replacing a pending record with the same
+                    # code would reset its guess counter; restoring past expiry would revive the code.
+                    if existing is None and rem_ttl > 0:
                         now_m = time.monotonic()
-                        rem_ttl = max(60.0, expires_at - time.time())
                         self.email_service._pending_otps[user_id] = PendingOtp(
                             user_id=user_id,
                             student_id=payload.get("student_id", ""),
