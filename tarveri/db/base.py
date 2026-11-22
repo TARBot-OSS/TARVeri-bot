@@ -14,3 +14,4 @@ class BaseRepoMixin:
     """Base mixin providing type awareness of SQLite connection to repository slices."""
 
     _conn: aiosqlite.Connection | None
+    admin_role_ids: dict[int, int]

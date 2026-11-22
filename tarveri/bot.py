@@ -44,6 +44,7 @@ from tarveri.services.storage_guard_service import StorageGuardService
 from tarveri.services.update_checker import UpdateCheckerService
 from tarveri.services.uptime_service import UptimeService
 from tarveri.services.verification_service import VerificationService
+from tarveri.views.guest_views import pick_admin_role_to_capture
 
 logger = logging.getLogger("tarveri")
 
@@ -298,6 +299,9 @@ class TARVeriBot(commands.Bot):
             # Run startup diagnostics and self-healing across connected guilds
             async def _startup_self_healing() -> None:
                 try:
+                    # 0. Record each guild's current admin role by ID, once, so existing admins keep access
+                    await self.capture_admin_roles()
+
                     for guild in self.guilds:
                         # 1. Restore faculty SRC roles if missing
                         if self.service:
@@ -326,6 +330,43 @@ class TARVeriBot(commands.Bot):
                     logger.error(f"Error during startup self-healing: {e}", exc_info=True)
 
             asyncio.create_task(_startup_self_healing(), name="tarveri_startup_self_healing")
+
+    async def capture_admin_roles(self) -> None:
+        """One-time capture of each guild's name-matched admin role as a trusted role ID.
+
+        Runs only for guilds with no stored ID yet (admin_role_id IS NULL), so a role created
+        later with the same name is never picked up. A guild with no admin role stores 0 and
+        relies on the Administrator / Manage Server permission check.
+        """
+        for guild in self.guilds:
+            if guild.id in self.db.admin_role_ids:
+                continue
+            try:
+                name = self.settings.admin_role_name
+                g_settings = await self.db.get_guild_settings(guild.id)
+                if g_settings and len(g_settings) > 4 and g_settings[4]:
+                    name = str(g_settings[4]).strip()
+                role, duplicates = pick_admin_role_to_capture(guild, name)
+                await self.db.set_guild_admin_role_id(guild.id, role.id if role else 0)
+                if role is None:
+                    continue
+                await self.db.log(
+                    "INFO",
+                    "ADMIN_ROLE_CAPTURED",
+                    f"Recorded admin role '{role.name}' (ID: {role.id}) as the trusted admin role in '{guild.name}'",
+                    guild=guild,
+                )
+                if duplicates:
+                    others = ", ".join(f"'{r.name}' (ID: {r.id})" for r in duplicates)
+                    await self.db.log(
+                        "WARNING",
+                        "ADMIN_ROLE_DUPLICATES",
+                        f"Other roles share the admin role name in '{guild.name}' and are NOT trusted: {others}. "
+                        "Delete them if nobody should have them, or pick a role with /admin set_role.",
+                        guild=guild,
+                    )
+            except Exception as exc:
+                logger.warning(f"Admin role capture failed for {guild.name}: {exc}", exc_info=True)
 
     async def close(self) -> None:
         """Gracefully tears down the bot, logs shutdown, and flushes SQLite WAL."""

@@ -253,6 +253,7 @@ class DashboardActionsMixin:
         await self.cog.db.set_guild_review_channel(interaction.guild.id, None)
         await self.cog.db.set_guild_guest_role(interaction.guild.id, "Guest")
         await self.cog.db.set_guild_admin_role(interaction.guild.id, None)
+        await self.cog.db.set_guild_admin_role_id(interaction.guild.id, 0)
         await self.cog.db.set_guild_email_verification(interaction.guild.id, False)
         await self.cog.db.set_guild_email_enforcement(interaction.guild.id, False)
 

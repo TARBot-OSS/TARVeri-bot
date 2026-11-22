@@ -240,6 +240,30 @@ class GuildSettingsRepoMixin(BaseRepoMixin):
                 (guild_id, role_to_set, ts),
             )
 
+    async def load_admin_role_ids(self) -> None:
+        """Loads every guild's trusted admin role ID into `self.admin_role_ids` (NULL rows are skipped)."""
+        if not self._conn:
+            raise RuntimeError("Database connection is not open.")
+        cursor = await self._conn.execute(
+            "SELECT guild_id, admin_role_id FROM guild_settings WHERE admin_role_id IS NOT NULL"
+        )
+        self.admin_role_ids = {int(gid): int(rid) for gid, rid in await cursor.fetchall()}
+
+    async def set_guild_admin_role_id(self, guild_id: int, role_id: int | None) -> None:
+        """Stores the trusted admin role ID for a guild. None or 0 means no trusted role (permission check only)."""
+        stored = int(role_id or 0)
+        ts = now_formatted()
+        async with self.transaction() as conn:
+            await conn.execute(
+                """INSERT INTO guild_settings (guild_id, admin_role_id, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(guild_id) DO UPDATE SET
+                       admin_role_id = excluded.admin_role_id,
+                       updated_at = excluded.updated_at""",
+                (guild_id, stored, ts),
+            )
+        self.admin_role_ids[guild_id] = stored
+
     async def clear_stale_channel_setting(self, guild_id: int, channel_type: str) -> bool:
         """
         Clears a deleted or invalid channel setting (welcome, help, or review) from guild_settings.
