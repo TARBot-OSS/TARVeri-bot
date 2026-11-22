@@ -59,7 +59,7 @@ HELP_LINES = [
     "  eval <code>                     Execute Python expression/statement",
     "  clear [output|logs|all]         Clear terminal screen or logs",
     "  stop, exit, quit                Gracefully shut down TARVeri",
-    "  • Hotkeys: F2/Ctrl+O (Toggle Output), F3 (Toggle Logs), PgUp/PgDn (Scroll)",
+    "  • Hotkeys: F2/Ctrl+O (Toggle Output), F3 (Toggle Logs), PgUp/PgDn or wheel (Scroll), Ctrl+End (Latest)",
     "========================================================================",
 ]
 
