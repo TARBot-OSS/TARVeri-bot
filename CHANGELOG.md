@@ -2,7 +2,64 @@
 
 All notable changes to the **TARVeri** Discord Student & Guest Verification Bot are documented in this file.
 
-## [v2.7.0] — 2026-09-24 (Current)
+## [v2.8.0] — 2026-11-22 (Current)
+### 🔐 Security Hardening
+* **Admin Role Trust (by ID, not name)** (#13, #17):
+  - A role named `TARVeri Admin` / `Admin` / `Administrator` no longer grants bot admin on its name alone. A moderator with Manage Roles could previously create one and assign it to themselves.
+  - On first startup the bot records each server's current admin role by ID, so existing admins keep access. A role created later with the same name is not trusted.
+  - Duplicate same-name roles are reported as `ADMIN_ROLE_DUPLICATES` in the log channel; the oldest role is kept.
+  - `/admin set_role` and the dashboard role picker now store the role ID.
+* **OTP Abuse Limits** (#14):
+  - At most 5 verification codes per user and 5 per email address per hour. This stops email flooding and limits code guessing.
+  - Fixed concurrent sends showing one user another user's bounce reason.
+  - Server names are HTML-escaped in verification emails.
+* **Email Delivery Safety** (#15):
+  - Missing SMTP credentials now fail with an error instead of silently "sending" and logging the code.
+  - OTP codes are no longer written to logs.
+  - Dead-letter retries no longer reset a code's attempt counter or revive expired codes.
+* **Mass Join Alerts**: Admins are alerted on bursts of joins; join-protection and audit tuning are editable from `/admin dashboard`.
+* **Signed Society Pairing Tokens**: TARClub pairing tokens are signed with HMAC.
+
+### 🖥️ Host Console
+* Interactive split-screen console for the bot host (`status`, `guilds`, `stats`, `lookup`, `verify`, `unverify`, `backup`, `say`, `broadcast`), with separate log and output panes, history and Tab completion.
+* Linux PAM login with password masking, lockout, a 5-minute inactivity auto-lock, and login/security alerts to `#tarveri-log`.
+* Console code now lives in the shared `tarbot-console` package (pinned to `v0.3.0`).
+
+### 🤝 TARClub Society Bridge
+* Cross-bot pairing commands and an eligibility API for TARClub societies.
+* Pairing issues and revokes are recorded in the audit log.
+
+### 📬 Reliability
+* **Dead Letter Queue**: failed verification emails, outage alerts and exception alerts are queued and retried automatically.
+* **Uptime Tracking**: uptime sessions, downtime detection, SLA scoring and all-time records, shown in `/admin dashboard`.
+* **Guest Tickets**: more resilient thread locking, fallback archiving, and self-healing for resolved threads.
+* **Updater**: `scripts/update.sh` restarts the bot in its tmux pane and migrates old git remotes to `TARBot-OSS`.
+
+### ✨ Features
+* Opt-in faculty SRC roles that server admins can enable and remove.
+* Custom welcome embed when the bot joins a new server.
+
+### ⚡ Performance
+* **Faster Reconciliation** (#16):
+  - Startup and `/admin diagnose` no longer make one Discord API call per verified user who is not in the server.
+  - Role classification runs once per role instead of once per member.
+* Concurrent join handlers are capped, and audit log writes are batched.
+
+### 🧹 Internals
+* Split the admin cog, dashboard, verification pipeline and reconcile loop into smaller modules; schema migrations now run in order (#6–#11).
+
+### 🧪 Tests & CI
+* Pinned the pytest-asyncio loop scope so CI no longer crashes before any test runs (#13).
+* Fixed a date-dependent email test that failed once its 2024 intake counted as graduated.
+
+### 📌 Upgrade Notes
+* `guild_settings.admin_role_id` is added automatically at startup.
+* With email verification on, `TARVERI_SMTP_USER` and `TARVERI_SMTP_PASSWORD` must be set, or code sends fail.
+* After deploy, check each server's log channel for `ADMIN_ROLE_CAPTURED`.
+
+---
+
+## [v2.7.0] — 2026-09-24
 ### 🔍 Member Verification & User Info Inspector
 * **Diagnostic User Metadata Inspection**:
   - Added `/admin user_info` slash command and **`🔍 Inspect User Info`** modal in `/admin dashboard` (under *Member Moderation*).
