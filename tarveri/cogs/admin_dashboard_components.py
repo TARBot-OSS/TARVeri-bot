@@ -111,6 +111,7 @@ class RoleSelectComponent(ui.RoleSelect):
             await interaction.response.defer(ephemeral=True)
         selected_role = self.values[0]
         await self.cog.db.set_guild_admin_role(interaction.guild.id, selected_role.name)
+        await self.cog.db.set_guild_admin_role_id(interaction.guild.id, selected_role.id)
 
         await self.cog.db.log(
             "INFO",

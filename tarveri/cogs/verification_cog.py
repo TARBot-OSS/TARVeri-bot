@@ -1032,6 +1032,10 @@ class VerificationCog(commands.Cog, name="Verification"):
         await self.db.log(
             "INFO", "GUILD_JOIN", f"Joined server '{guild.name}' (members: {guild.member_count})", guild=guild
         )
+        # A new server has no existing admin setup to keep: skip the startup capture and rely on
+        # the permission check until an admin picks a role with /admin set_role.
+        if guild.id not in self.db.admin_role_ids:
+            await self.db.set_guild_admin_role_id(guild.id, 0)
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild) -> None:

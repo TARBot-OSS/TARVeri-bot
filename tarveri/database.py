@@ -276,7 +276,8 @@ _SCHEMA_TABLES_SQL = """
                 require_email_verification INTEGER DEFAULT 0,
                 enforce_email_verification INTEGER DEFAULT 0,
                 enable_src_roles INTEGER DEFAULT 0,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                admin_role_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS referral_codes (
@@ -475,6 +476,8 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("enforce_email_verification", "INTEGER DEFAULT 0"),
             ("enable_src_roles", "INTEGER DEFAULT 0"),
             ("updated_at", "TEXT DEFAULT ''"),
+            # Trusted admin role ID. NULL = not captured yet, 0 = none (permission check only).
+            ("admin_role_id", "INTEGER"),
         ),
     ),
     (
@@ -641,6 +644,8 @@ class Database(
         self._audit_buffer: list[tuple[Any, ...]] = []
         self._audit_flush_task: asyncio.Task[None] | None = None
         self.runtime_settings: dict[str, float | int] = default_runtime_values()
+        # guild_id -> trusted admin role ID (0 = none). Read by the synchronous admin check.
+        self.admin_role_ids: dict[int, int] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -671,6 +676,7 @@ class Database(
         await _apply_data_migrations(self._conn)
 
         await self.load_runtime_settings()
+        await self.load_admin_role_ids()
         await self._stamp_schema_version()
         await self._conn.commit()
 
