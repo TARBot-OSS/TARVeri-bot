@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING
 import discord
 from discord import ui
 
+from tarveri.config import CAMPUS_ROLES, STUDY_LEVEL_ROLES
 from tarveri.runtime_settings import RUNTIME_SETTINGS, SETTINGS_BY_KEY, parse_runtime_form
+from tarveri.services.student_search import StudentNameMatch, search_students_by_name
 from tarveri.utils import schedule_ttl_delete
 
 if TYPE_CHECKING:
@@ -160,6 +162,98 @@ class UserLookupModal(ui.Modal, title="🔍 Member & Verification Lookup"):
 
         embed = await self.dashboard_view.build_user_details_embed(user_id, interaction.guild)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+class StudentSearchResultSelect(ui.Select):
+    """Opens the full lookup record for one of the name search results."""
+
+    def __init__(self, dashboard_view: AdminDashboardView, matches: list[StudentNameMatch]) -> None:
+        options = [
+            discord.SelectOption(
+                label=m.name.title()[:100],
+                value=str(m.discord_user_id),
+                description=f"{m.faculty_code or '?'} · {CAMPUS_ROLES.get(m.campus_code or '', '?')} · {int(m.score * 100)}% match"[
+                    :100
+                ],
+            )
+            for m in matches
+        ]
+        super().__init__(placeholder="Open a student's full record...", options=options, min_values=1, max_values=1)
+        self.dashboard_view = dashboard_view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        embed = await self.dashboard_view.build_user_details_embed(int(self.values[0]), interaction.guild)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+class StudentNameSearchModal(ui.Modal, title="🔎 Find Student by Name"):
+    name_query = ui.TextInput(
+        label="Student name",
+        placeholder="e.g. Tan Wei Ming, weiming tan, or tanweiming",
+        required=True,
+        min_length=2,
+        max_length=64,
+    )
+
+    def __init__(self, cog: AdminCog, dashboard_view: AdminDashboardView) -> None:
+        super().__init__()
+        self.cog = cog
+        self.dashboard_view = dashboard_view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not interaction.guild:
+            await interaction.followup.send("❌ This search only works inside a server.", ephemeral=True)
+            return
+        email_service = getattr(self.cog.bot, "email_service", None)
+        if not email_service or not getattr(email_service.settings, "email_encryption_key", ""):
+            await interaction.followup.send(
+                "❌ Name search needs `TARVERI_EMAIL_ENCRYPTION_KEY`: names come from encrypted student emails.",
+                ephemeral=True,
+            )
+            return
+
+        query = self.name_query.value.strip()
+        records = await self.cog.db.get_email_verified_students()
+        # Only this server's members: admins of one server cannot browse students of another.
+        member_ids = {m.id for m in interaction.guild.members}
+        matches = search_students_by_name(query, records, email_service.decrypt_student_email, member_ids)
+
+        await self.cog.db.log(
+            "INFO",
+            "ADMIN_STUDENT_NAME_SEARCH",
+            f"Admin {interaction.user} searched students by name '{query}' ({len(matches)} match(es))",
+            guild=interaction.guild,
+            user_id=interaction.user.id,
+        )
+
+        if not matches:
+            await interaction.followup.send(
+                f"🔎 No email-verified member matches **{discord.utils.escape_markdown(query)}**. "
+                "Only students who verified with their institutional email have a name on file.",
+                ephemeral=True,
+            )
+            return
+
+        lines = []
+        for i, m in enumerate(matches, 1):
+            level = STUDY_LEVEL_ROLES.get(m.level_code or "", "?")
+            campus = CAMPUS_ROLES.get(m.campus_code or "", "?")
+            alumni = " · 🎓 Alumni" if m.is_alumni else ""
+            lines.append(
+                f"**{i}. {m.name.title()}** — <@{m.discord_user_id}> (`{m.discord_user_id}`)\n"
+                f"   {m.faculty_code or '?'} · {campus} · {level}{alumni} · {int(m.score * 100)}% match"
+            )
+        embed = discord.Embed(
+            title=f"🔎 Students matching “{query}”",
+            description="\n".join(lines),
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text="Names come from the student's institutional email. Pick one below for the full record.")
+        view = ui.View(timeout=300)
+        view.add_item(StudentSearchResultSelect(self.dashboard_view, matches))
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class GuestRoleModal(ui.Modal, title="⚙️ Configure Guest Role Name"):

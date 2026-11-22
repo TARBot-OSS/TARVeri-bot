@@ -140,6 +140,10 @@ class AdminDashboardView(DashboardEmbedsMixin, DashboardActionsMixin, ui.View):
             btn_lookup.callback = self._on_user_lookup_clicked
             self.add_item(btn_lookup)
 
+            btn_name_search = ui.Button(label="Find Student by Name", style=discord.ButtonStyle.primary, emoji="🔎")
+            btn_name_search.callback = self._on_name_search_clicked
+            self.add_item(btn_name_search)
+
             btn_unverify = ui.Button(label="Unverify Student", style=discord.ButtonStyle.danger, emoji="❌")
             btn_unverify.callback = self._on_unverify_clicked
             self.add_item(btn_unverify)
