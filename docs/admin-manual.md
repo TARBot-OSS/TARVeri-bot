@@ -31,6 +31,11 @@ Opens the interactive Administrator Control Center featuring:
 
 Administrators can inspect comprehensive verification and membership metadata for any server member:
 
+### Find Student by Name (Dashboard):
+- `/admin dashboard` → **Member Moderation** → **🔎 Find Student by Name**.
+- Fuzzy-matches the name part of each student's institutional email (`tanweiming-wm24@...` → `tanweiming`). Typos, partial names and any word order work: `weiming tan`, `tan wei mng`.
+- Only email-verified students who are members of the current server are searched. Pick a result to open the full lookup record. Each search is written to the audit log.
+
 ### Slash Command:
 - **`/admin user_info user:@Member`** (or by Discord user snowflake ID):
   - **Verification Status**: Displays Tier 1 (Fast Verified without email) or Tier 2 (Email-Attested OTP).

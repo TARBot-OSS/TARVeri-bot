@@ -17,6 +17,7 @@ from tarveri.cogs.admin_dashboard_modals import (
     AlumniRevokeModal,
     GuestRoleModal,
     RuntimeSettingsModal,
+    StudentNameSearchModal,
     UnverifyModal,
     UserLookupModal,
 )
@@ -162,6 +163,9 @@ class DashboardActionsMixin:
     async def _on_user_lookup_clicked(self, interaction: discord.Interaction) -> None:
         modal = UserLookupModal(self.cog, self)
         await interaction.response.send_modal(modal)
+
+    async def _on_name_search_clicked(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(StudentNameSearchModal(self.cog, self))
 
     async def _on_unverify_clicked(self, interaction: discord.Interaction) -> None:
         modal = UnverifyModal(self.cog, self)
