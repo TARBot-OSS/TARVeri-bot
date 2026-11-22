@@ -245,6 +245,11 @@ class DashboardEmbedsMixin:
             inline=False,
         )
         embed.add_field(
+            name="🚫 List Unverified Members",
+            value="Shows this server's members with no student verification (guests included) and attaches the full list as a CSV.",
+            inline=False,
+        )
+        embed.add_field(
             name="❌ Unverify Student",
             value="Unlinks student ID hash, resets rate limiting, and revokes faculty roles across mutual servers.",
             inline=False,
